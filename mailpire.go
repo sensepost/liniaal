@@ -17,7 +17,7 @@ import (
 )
 
 //globals
-var config utils.Config
+var config utils.Session
 var seen [][]byte
 var folderid []byte
 
@@ -111,7 +111,7 @@ func main() {
 	fmt.Println("[+] MAPI URL found: ", mapiURL)
 	fmt.Println("[+] MAPI AddressBook URL found: ", abkURL)
 
-	mapi.Init(config, userDN, mapiURL, abkURL, mapi.HTTP)
+	mapi.Init(&config, userDN, mapiURL, abkURL, mapi.HTTP)
 
 	logon, err := mapi.Authenticate()
 	if err != nil {
@@ -180,12 +180,12 @@ func sendMessage(folderid []byte, rpc string) {
 
 	propertyTagx := make([]mapi.TaggedPropertyValue, 8)
 
-	propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, mapi.UniString(rpc)}
-	propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, mapi.UniString("mailpirein")}
-	propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, mapi.UniString("mailpirein")}
+	propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rpc)}
+	propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString("mailpirein")}
+	propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString("mailpirein")}
 
-	propertyTagx[1] = mapi.TaggedPropertyValue{mapi.PropertyTag{mapi.PtypString, 0x001A}, mapi.UniString("IPM.Note")}
-	propertyTagx[2] = mapi.TaggedPropertyValue{mapi.PidTagConversationTopic, mapi.UniString("mailpirein")}
+	propertyTagx[1] = mapi.TaggedPropertyValue{mapi.PropertyTag{mapi.PtypString, 0x001A}, utils.UniString("IPM.Note")}
+	propertyTagx[2] = mapi.TaggedPropertyValue{mapi.PidTagConversationTopic, utils.UniString("mailpirein")}
 	propertyTagx[3] = mapi.PidTagIconIndex
 	propertyTagx[4] = mapi.PidTagMessageEditorFormat
 	propertyTagx[5] = mapi.TaggedPropertyValue{mapi.PidTagNativeBody, []byte{0x00, 0x00, 0x00, 0x01}}
@@ -207,16 +207,16 @@ func sendMessage(folderid []byte, rpc string) {
 				index += split
 
 				if kk == 0 {
-					propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, mapi.UniString(fmt.Sprintf("mailpirein-b%d", piecescnt))}
-					propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, mapi.UniString(fmt.Sprintf("mailpirein-b%d", piecescnt))}
+					propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString(fmt.Sprintf("mailpirein-b%d", piecescnt))}
+					propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString(fmt.Sprintf("mailpirein-b%d", piecescnt))}
 
 				} else {
-					propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, mapi.UniString(fmt.Sprintf("mailpirein-%d", kk))}
-					propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, mapi.UniString(fmt.Sprintf("mailpirein-%d", kk))}
+					propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString(fmt.Sprintf("mailpirein-%d", kk))}
+					propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString(fmt.Sprintf("mailpirein-%d", kk))}
 				}
 			}
 
-			propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, mapi.UniString(rrpc)}
+			propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rrpc)}
 
 			_, er := mapi.CreateMessage(folderid, propertyTagx)
 			if er != nil {
@@ -225,9 +225,9 @@ func sendMessage(folderid []byte, rpc string) {
 		}
 		if len(rpc) > split*piecescnt {
 			rrpc = rpc[index:]
-			propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, mapi.UniString(rrpc + "\n\r")}
-			propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, mapi.UniString("mailpirein-s")}
-			propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, mapi.UniString("mailpirein-s")}
+			propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rrpc + "\n\r")}
+			propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString("mailpirein-s")}
+			propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString("mailpirein-s")}
 			_, er := mapi.CreateMessage(folderid, propertyTagx)
 
 			if er != nil {
