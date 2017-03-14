@@ -23,7 +23,7 @@ import (
 var config utils.Session
 var seen [][]byte
 var lastSeen time.Time
-var mailpire MailPireConfig
+var liniaal LiniaalConfig
 var agent Agent
 var nocache = false
 
@@ -41,8 +41,8 @@ type Agent struct {
 	MapiSession  utils.Session
 }
 
-//MailPireConfig holds global configuration data
-type MailPireConfig struct {
+//LiniaalConfig holds global configuration data
+type LiniaalConfig struct {
 	FolderName string //name for our hidden folder
 }
 
