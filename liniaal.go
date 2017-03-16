@@ -26,6 +26,19 @@ var lastSeen time.Time
 var liniaal LiniaalConfig
 var agent Agent
 var nocache = false
+var client = &http.Client{}
+
+var dataIn, dataOut = io.Pipe()
+var strLen = 0
+
+var options = make(map[string]Option)
+var term *terminal.Terminal
+
+//Option struct for controlling agent options through a menu
+type Option struct {
+	Value       string
+	Description string
+}
 
 //Agent holds information about the current agent
 type Agent struct {
@@ -153,7 +166,6 @@ func getMessage(agent *Agent) string {
 						continue
 					}
 
-					client := &http.Client{}
 					var req *http.Request
 
 					utils.Info.Printf("Got message from Agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM"))
@@ -220,7 +232,26 @@ func getMessage(agent *Agent) string {
 	return rpc
 }
 
-func setupSession() {
+func deleteMessages() {
+	folderid := agent.FolderID
+	result, err := mapi.EmptyFolder(folderid)
+	if err != nil {
+		return
+	}
+	utils.Info.Print(result.ReturnValue)
+}
+
+func deleteFolder() {
+	folderid := agent.FolderID
+	result, err := mapi.DeleteFolder(folderid)
+	if err != nil {
+		utils.Error.Print(err)
+		return
+	}
+	utils.Info.Print(result.ReturnValue)
+}
+
+func setupSession() error {
 	var config utils.Session
 	//setup our autodiscover service
 	config.Domain = agent.Domain
@@ -276,16 +307,19 @@ func setupSession() {
 		}
 	}
 	agent.MapiSession = *mapi.AuthSession
+	logon, err := mapi.Authenticate()
+	if err != nil {
+		return err
+	}
+	utils.Info.Println("Authenticated")
+	err = checkFolder(logon)
+
+	return err
 }
 
-func runAgent() {
+func checkFolder(logon *mapi.RopLogonResponse) error {
 
-	logon, err := mapi.Authenticate()
-	utils.Info.Println("Authenticated - Setting Up Agent")
-
-	if err != nil {
-		exit(err)
-	} else if logon.MailboxGUID != nil {
+	if logon.MailboxGUID != nil {
 		propertyTags := make([]mapi.PropertyTag, 2)
 		propertyTags[0] = mapi.PidTagDisplayName
 		propertyTags[1] = mapi.PidTagSubfolders
@@ -307,7 +341,7 @@ func runAgent() {
 			mapi.GetFolder(mapi.INBOX, propertyTags)
 			_, err := mapi.CreateFolder(agent.FolderName, true)
 			if err != nil {
-				return
+				return err
 			}
 
 			time.Sleep(time.Second * (time.Duration)(2))
@@ -322,30 +356,26 @@ func runAgent() {
 				}
 			}
 		}
-		utils.Info.Print("Agent Listening")
-		output("")
-		for {
-			rpc := getMessage(&agent)
-			if rpc != "" {
-				utils.Info.Printf("Sending response of length %d to agent", len(rpc))
-				sendMessage(&agent, rpc)
-				utils.Info.Printf("Sent response to agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM"))
-			}
+	}
+	return nil
+}
+
+func runAgent() {
+
+	utils.Info.Print("Agent Listening")
+	output("")
+	for {
+		rpc := getMessage(&agent)
+		if rpc != "" {
+			utils.Info.Printf("Sending response of length %d to agent", len(rpc))
+			sendMessage(&agent, rpc)
+			utils.Info.Printf("Sent response to agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM"))
 		}
 	}
 }
 
-//Option struct for controlling agent options through a menu
-type Option struct {
-	Value       string
-	Description string
-}
-
-var options = make(map[string]Option)
-var term *terminal.Terminal
-
 func autocomp(line string, pos int, key rune) (newLine string, newPos int, ok bool) {
-	cmds := []string{"options", "info", "set", "run", "exit"}
+	cmds := []string{"options", "info", "set", "run", "execute", "flush", "delete", "exit"}
 
 	if byte(key) != 9 {
 		return line, pos, false
@@ -369,9 +399,6 @@ func autocomp(line string, pos int, key rune) (newLine string, newPos int, ok bo
 
 	return line, pos, false
 }
-
-var dataIn, dataOut = io.Pipe()
-var strLen = 0
 
 //output writer for the terminal. ensure proper line endings
 func output(data string) {
@@ -407,6 +434,30 @@ func getOption(name string) string {
 	return options[name].Value
 }
 
+func checkOptions() error {
+	agent.Host = getOption("Host")
+	agent.EmailAddress = getOption("EmailAddress")
+	agent.Password = getOption("Password")
+	agent.Username = getOption("Username")
+	agent.FolderName = getOption("Folder")
+	agent.Domain = getOption("Domain")
+
+	return nil
+}
+
+func printHelp() {
+	output("== Help ==")
+	output("")
+	fmtstring := fmt.Sprintf("%%-15s %%-s")
+	output(fmt.Sprintf(fmtstring, "help", "this help screen"))
+	output(fmt.Sprintf(fmtstring, "options", "display the agent options"))
+	output(fmt.Sprintf(fmtstring, "set key value", "set the value of an option"))
+	output(fmt.Sprintf(fmtstring, "run", "start the listener/channel"))
+	output(fmt.Sprintf(fmtstring, "execute", "start the listener/channel"))
+	output(fmt.Sprintf(fmtstring, "flush", "remove all messages currently in the hidden folder"))
+	output(fmt.Sprintf(fmtstring, "delete", "delete the hidden folder"))
+}
+
 func main() {
 	options = map[string]Option{
 		"EmailAddress": {"demo@outlook.com", "The target mailbox/email address"},
@@ -435,6 +486,9 @@ func main() {
 			terminal.Restore(0, oldState)
 			os.Exit(0)
 		}
+		if line == "help" {
+			printHelp()
+		}
 		if line == "options" || line == "info" {
 			output("== Agent options ==")
 			for k, v := range options {
@@ -444,29 +498,62 @@ func main() {
 		if len(parts) == 3 && parts[0] == "set" {
 			setOption(parts[1], parts[2])
 		}
-		if line == "run" {
-			break
+		if line == "run" || line == "execute" {
+			if err := checkOptions(); err != nil {
+				output(fmt.Sprintf("Failed! - please check %s", err))
+			} else {
+				output("")
+				terminal.Restore(0, oldState)
+
+				utils.Init(ioutil.Discard, dataOut, dataOut, dataOut) //os.Stderr)
+				go outputStatus()
+
+				if err := setupSession(); err != nil {
+					exit(err)
+				}
+
+				go runAgent()
+				x := make(chan bool, 1)
+				<-x
+			}
+		}
+		if line == "flush" {
+			if err := checkOptions(); err != nil {
+				output(fmt.Sprintf("Failed! - please check %s", err))
+			} else {
+				output("")
+				terminal.Restore(0, oldState)
+
+				utils.Init(ioutil.Discard, dataOut, dataOut, dataOut) //os.Stderr)
+				go outputStatus()
+
+				if err := setupSession(); err != nil {
+					exit(err)
+				}
+				utils.Info.Print("Deleting messages")
+				deleteMessages()
+				output("")
+				terminal.MakeRaw(0)
+			}
+		}
+		if line == "delete" {
+			if err := checkOptions(); err != nil {
+				output(fmt.Sprintf("Failed! - please check %s", err))
+			} else {
+				output("")
+				terminal.Restore(0, oldState)
+
+				utils.Init(ioutil.Discard, dataOut, dataOut, dataOut) //os.Stderr)
+				go outputStatus()
+
+				if err := setupSession(); err != nil {
+					exit(err)
+				}
+				utils.Info.Print("Deleting folder")
+				deleteFolder()
+				output("")
+				terminal.MakeRaw(0)
+			}
 		}
 	}
-	output("")
-	terminal.Restore(0, oldState)
-
-	utils.Init(ioutil.Discard, dataOut, dataOut, os.Stderr)
-	go outputStatus()
-
-	terminal.Restore(0, oldState)
-
-	agent.Host = getOption("Host")
-	agent.EmailAddress = getOption("EmailAddress")
-	agent.Password = getOption("Password")
-	agent.Username = getOption("Username")
-	agent.FolderName = getOption("Folder")
-	agent.Domain = getOption("Domain")
-
-	setupSession()
-
-	go runAgent()
-	x := make(chan bool, 1)
-	<-x
-
 }
