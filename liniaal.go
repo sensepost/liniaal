@@ -243,12 +243,11 @@ func deleteMessages() {
 
 func deleteFolder() {
 	folderid := agent.FolderID
-	result, err := mapi.DeleteFolder(folderid)
+	_, err := mapi.DeleteFolder(folderid)
 	if err != nil {
 		utils.Error.Print(err)
 		return
 	}
-	utils.Info.Print(result.ReturnValue)
 }
 
 func setupSession() error {
@@ -274,7 +273,6 @@ func setupSession() error {
 	var resp *utils.AutodiscoverResp
 	var rawAutodiscover string
 	var err error
-	//var err error
 
 	if nocache == false {
 		resp = autodiscover.CheckCache(config.Email)
@@ -505,7 +503,8 @@ func main() {
 				output("")
 				terminal.Restore(0, oldState)
 
-				utils.Init(ioutil.Discard, dataOut, dataOut, dataOut) //os.Stderr)
+				//utils.Init(ioutil.Discard, dataOut, dataOut, dataOut) //os.Stderr)
+				utils.Init(dataOut, dataOut, dataOut, dataOut) //os.Stderr)
 				go outputStatus()
 
 				if err := setupSession(); err != nil {
