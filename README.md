@@ -4,6 +4,8 @@ Liniaal allows for the creation of a C2 channel for Empire agents, through an Ex
 
 Liniaal allows Empire to be used as usual, through a high latency, stealthy channel.
 
+A full-end-to-end example is available on [YouTube] and an outline can be found in the [SensePost blog].
+
 
 # Getting the Code
 
@@ -174,3 +176,5 @@ The Powershell agent does not have any persistence or ability to respawn itself.
 [Empire]:<https://github.com/EmpireProject/Empire/tree/2.0_beta>
 [stager]:<https://github.com/sensepost/liniaal/blob/master/empire/data/stagers/http_mapi.ps1>
 [listener]:<https://github.com/sensepost/liniaal/blob/master/empire/lib/listeners/http_mapi.py>
+[SensePost blog]:<https://sensepost.com/blog/2017/Liniaal_-_Empire_through_Exchange>
+[YouTube]:<https://www.youtube.com/watch?v=kRg09kUGpHs>
