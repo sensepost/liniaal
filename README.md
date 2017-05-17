@@ -9,13 +9,13 @@ A full-end-to-end example is available on [YouTube] and an outline can be found 
 
 # Getting the Code
 
-Liniaal depends heavily on the libraries created by [Ruler]. To interface with Powershell [Empire] you will require the 2.0_dev branch.
+Liniaal depends heavily on the libraries created by [Ruler]. To interface with Powershell [Empire] you will require version 2.0.
 
 Dependencies:
 
 * [Ruler]  
 * [golang.org/x/crypto/ssh/terminal]
-* [Empire] version 2.0_dev
+* [Empire] version 2.0
 
 The simpliest way to get Liniaal is to use `go get`:
 
@@ -50,7 +50,7 @@ Compiled binaries for Linux, OSX and Windows are available. Find these in [Relea
 Firstly copy the [stager] and [listener] to the relevant directories within Empire.
 
 ```
-cp empire/data/stagers/http_mapi.ps1 /opt/empire/data/stagers/
+cp empire/agent/data/stagers/http_mapi.ps1 /opt/empire/data/agent/stagers/
 cp empire/lib/listeners/http_mapi.py /opt/empire/lib/listeners/
 ```
 
@@ -63,8 +63,10 @@ To setup the listener within Empire:
 (Empire: listeners) > uselistener http_mapi
 ```
 
-The only new option is **Folder** which allows you to specify a name for the hidden folder used for communication. The default folder name is **Liniaal**.
-Change this if you wish and then execute the listener.
+There are two new options **Folder** and **EmailAddress**, of which only  **Folder** is mandatory. **Folder** allows you to specify a name for the hidden folder used for communication. The default folder name is **Liniaal**.
+The **EmailAddress** is used to provide an email address for Liniaal to use on the client-side. This may be required in instances where users have multiple mailboxes. If this is set, the agent will locate the correct mailbox and use that for communication. If **EmailAddress** is left blank, the agent will use the primary mailbox. This should be sufficient in most cases and provides you with a generic listener, which can be used with multiple targets.
+
+Change these to a custom values if you wish and then execute the listener.
 
 ```
 (Empire: listeners/http_mapi) > set Folder Liniaal

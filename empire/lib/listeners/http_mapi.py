@@ -24,11 +24,11 @@ class Listener:
 
             'Author': ['@harmj0y','@_staaldraad'],
 
-            'Description': ('Starts a http[s] listener (PowerShell or Python) which can be used with Mailpire for C2 through Exchange'),
+            'Description': ('Starts a http[s] listener (PowerShell) which can be used with Liniaal for C2 through Exchange'),
 
             'Category' : ('client_server'),
 
-            'Comments': []
+            'Comments': ['This requires the Liniaal agent to translate messages from MAPI to HTTP. More info: https://github.com/sensepost/liniaal']
         }
 
         # any options needed by the stager, settable during runtime
