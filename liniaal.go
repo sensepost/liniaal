@@ -168,9 +168,12 @@ func getMessage(agent *Agent) string {
 
 					var req *http.Request
 
-					utils.Info.Printf("Got message from Agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM"))
+					utils.Info.Printf("Got message from Agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM "))
 
-					if strings.ToUpper(string(payload[0:5])) == "POST " {
+          //uncomment below for debug
+          //output("Payload: "+string(payload))
+
+          if strings.ToUpper(string(payload[0:5])) == "POST " {
 						pp := toBytes(payload[7:])
 						req, _ = http.NewRequest("POST", fmt.Sprintf("%s/index.jsp", agent.Host), bytes.NewBuffer(pp))
 						req.Header.Add("Content-Type", "application/binary")
@@ -443,6 +446,7 @@ func checkOptions() error {
 	agent.Username = getOption("Username")
 	agent.FolderName = getOption("Folder")
 	agent.Domain = getOption("Domain")
+  agent.URL = getOption("URL")
 
 	return nil
 }
