@@ -170,10 +170,10 @@ func getMessage(agent *Agent) string {
 
 					utils.Info.Printf("Got message from Agent at: %s", time.Now().Format("02/01/2006 03:04:05 PM "))
 
-          //uncomment below for debug
-          //output("Payload: "+string(payload))
+					//uncomment below for debug
+					output("Payload: " + string(payload))
 
-          if strings.ToUpper(string(payload[0:5])) == "POST " {
+					if strings.ToUpper(string(payload[0:5])) == "POST " {
 						pp := toBytes(payload[7:])
 						req, _ = http.NewRequest("POST", fmt.Sprintf("%s/index.jsp", agent.Host), bytes.NewBuffer(pp))
 						req.Header.Add("Content-Type", "application/binary")
@@ -210,6 +210,7 @@ func getMessage(agent *Agent) string {
 						defer resp.Body.Close()
 					}
 					if err != nil {
+						output(err.Error())
 						continue
 					}
 					var body []byte
@@ -246,11 +247,12 @@ func deleteMessages() {
 
 func deleteFolder() {
 	folderid := agent.FolderID
-	_, err := mapi.DeleteFolder(folderid)
+	res, err := mapi.DeleteFolder(mapi.AuthSession.Folderids[mapi.INBOX], folderid)
 	if err != nil {
 		utils.Error.Print(err)
 		return
 	}
+	utils.Info.Print(res)
 }
 
 func setupSession() error {
@@ -446,7 +448,7 @@ func checkOptions() error {
 	agent.Username = getOption("Username")
 	agent.FolderName = getOption("Folder")
 	agent.Domain = getOption("Domain")
-  agent.URL = getOption("URL")
+	agent.URL = getOption("URL")
 
 	return nil
 }
